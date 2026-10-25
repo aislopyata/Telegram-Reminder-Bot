@@ -1,0 +1,25 @@
+[Unit]
+Description=Telegram Reminder Bot (long polling + scheduler)
+Documentation=file:///opt/telegram-reminder-bot/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reminderbot
+Group=reminderbot
+WorkingDirectory=/opt/telegram-reminder-bot
+EnvironmentFile=/etc/telegram-reminder-bot/bot.env
+ExecStart=/usr/bin/npm run bot:start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/telegram-reminder-bot
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,53 @@
+{
+  "name": "telegram-reminder-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "bot:start": "tsx src/bot/index.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "webhook:set": "node scripts/set-webhook.mjs",
+    "webhook:delete": "node scripts/set-webhook.mjs --delete",
+    "webhook:info": "node scripts/set-webhook.mjs --info",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "grammy": "1.46.0",
+    "luxon": "3.7.2",
+    "next": "16.4.3",
+    "node-cron": "^4.6.0",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/luxon": "3.7.6",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "dotenv": "18.0.9",
+    "eslint": "10.13.0",
+    "eslint-config-next": "16.4.3",
+    "prisma": "7.10.1",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "vitest-mock-extended": "5.1.1"
+  }
+}

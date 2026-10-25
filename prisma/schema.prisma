@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ReminderType {
+  ONCE
+  RECURRING
+}
+
+enum RecurrenceType {
+  WEEKLY
+  MONTHLY
+}
+
+enum ReminderStatus {
+  ACTIVE
+  DISABLED
+  COMPLETED
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum OccurrenceStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+enum DeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  RETRYABLE
+  PERMANENT
+  SKIPPED
+}
+
+enum WorkflowState {
+  WIZARD
+  AWAIT_TEXT
+  AWAIT_FRIEND_USERNAME
+  AWAIT_TIMEZONE
+}
+
+model User {
+  id                  String   @id @default(cuid())
+  telegramUserId      String   @unique
+  telegramUsername    String?
+  firstName           String
+  timeZone            String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  reminders           Reminder[]        @relation("ReminderOwner")
+  reminderRecipients  ReminderRecipient[]
+  sentFriendRequests  FriendRequest[]   @relation("FriendRequestRequester")
+  recvFriendRequests  FriendRequest[]   @relation("FriendRequestRecipient")
+  friendshipsAsA      Friendship[]      @relation("FriendshipA")
+  friendshipsAsB      Friendship[]      @relation("FriendshipB")
+  deliveries          ReminderDelivery[]
+  workflow            Workflow?
+
+  @@index([telegramUsername])
+}
+
+model Reminder {
+  id               String          @id @default(cuid())
+  ownerId          String
+  text             String
+  type             ReminderType
+  recurrenceType   RecurrenceType?
+  scheduledAtUtc   DateTime?
+  localTime        String?
+  timeZone         String
+  recurrenceDays   Int[]           @default([])
+  nextRunAtUtc     DateTime?
+  status           ReminderStatus  @default(ACTIVE)
+  claimToken       String?
+  claimExpiresAt   DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  owner            User               @relation("ReminderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  recipients       ReminderRecipient[]
+  occurrences      ReminderOccurrence[]
+
+  @@index([ownerId, createdAt])
+  @@index([status, nextRunAtUtc])
+  @@index([claimExpiresAt])
+}
+
+model ReminderRecipient {
+  id              String   @id @default(cuid())
+  reminderId      String
+  recipientUserId String
+  createdAt       DateTime @default(now())
+
+  reminder        Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  recipient       User     @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([reminderId, recipientUserId])
+  @@index([recipientUserId])
+}
+
+model FriendRequest {
+  id          String              @id @default(cuid())
+  requesterId String
+  recipientId String
+  pairKey     String              @unique
+  status      FriendRequestStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  requester   User @relation("FriendRequestRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient   User @relation("FriendRequestRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, status])
+  @@index([requesterId, status])
+}
+
+model Friendship {
+  id        String   @id @default(cuid())
+  userAId   String
+  userBId   String
+  createdAt DateTime @default(now())
+
+  userA     User @relation("FriendshipA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User @relation("FriendshipB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+model ReminderOccurrence {
+  id             String           @id @default(cuid())
+  reminderId     String
+  scheduledAtUtc DateTime
+  status         OccurrenceStatus @default(PENDING)
+  createdAt      DateTime         @default(now())
+  processedAt    DateTime?
+
+  reminder       Reminder           @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  deliveries     ReminderDelivery[]
+
+  @@unique([reminderId, scheduledAtUtc])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ReminderDelivery {
+  id               String         @id @default(cuid())
+  occurrenceId     String
+  recipientUserId  String
+  status           DeliveryStatus @default(PENDING)
+  attempts         Int            @default(0)
+  nextAttemptAtUtc DateTime       @default(now())
+  sentAtUtc        DateTime?
+  lastError        String?
+  claimToken       String?
+  lockedUntil      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  occurrence       ReminderOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  recipient        User               @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([occurrenceId, recipientUserId])
+  @@index([status, nextAttemptAtUtc])
+  @@index([lockedUntil])
+  @@index([recipientUserId])
+}
+
+model Workflow {
+  id        String        @id @default(cuid())
+  userId    String        @unique
+  state     WorkflowState
+  data      Json
+  messageId Int?
+  expiresAt DateTime
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model ProcessedUpdate {
+  updateId    BigInt   @id
+  processedAt DateTime @default(now())
+}
