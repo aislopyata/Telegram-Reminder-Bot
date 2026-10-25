@@ -33,6 +33,21 @@ import {
 } from "@/lib/services/reminders";
 import { ReminderServiceError } from "@/lib/services/reminders";
 import {
+  HABIT_NAME_MAX,
+  createHabit,
+  disableHabitReminder,
+  getActiveHabitForUser,
+  getHabitReminderSettings,
+  getHabitStatistics,
+  listActiveHabits,
+  listActiveHabitsWithCompletion,
+  setHabitCompletion,
+  setHabitReminder,
+  softDeleteHabit,
+  validateHabitName,
+} from "@/lib/services/habits";
+import { todayInZone } from "@/lib/habits/stats";
+import {
   DraftError,
   draftFromReminder,
   newCreateDraft,
@@ -55,6 +70,15 @@ import {
   friendRequestNotificationKeyboard,
   friendSelectKeyboard,
   friendsMenuKeyboard,
+  habitDeleteConfirmKeyboard,
+  habitDeleteListKeyboard,
+  habitEmptyKeyboard,
+  habitReminderHoursKeyboard,
+  habitReminderMinutesKeyboard,
+  habitReminderSettingsKeyboard,
+  habitStatsKeyboard,
+  habitTrackingKeyboard,
+  habitsListKeyboard,
   hourKeyboard,
   menuKeyboard,
   minuteKeyboard,
@@ -70,6 +94,12 @@ import {
 } from "@/lib/telegram/ui";
 import {
   formatDraftConfirmation,
+  formatHabitDeleteConfirmation,
+  formatHabitDeleteList,
+  formatHabitList,
+  formatHabitReminderSettings,
+  formatHabitStats,
+  formatHabitTracking,
   formatReminderListLine,
   formatReminderSummary,
   monthCells,
@@ -87,6 +117,32 @@ function sendText(
   reply?: InlineKeyboard,
 ): Promise<number> {
   return sender.sendMessage(chatId, text, reply);
+}
+
+/**
+ * Habit screens are updated in place when they were opened from an inline
+ * button, so repeated taps do not flood the chat with stale keyboards.
+ */
+async function editOrSend(
+  sender: TelegramSender,
+  chatId: string,
+  messageId: number | null,
+  text: string,
+  reply?: InlineKeyboard,
+): Promise<void> {
+  if (messageId !== null) {
+    try {
+      const result = await sender.editMessageText(chatId, messageId, text, reply);
+      if (result === "edited" || result === "unchanged") return;
+    } catch (error) {
+      logger.debug("habit_message_edit_failed", {
+        chatId,
+        messageId,
+        error: String(error).slice(0, 200),
+      });
+    }
+  }
+  await sendText(sender, chatId, text, reply);
 }
 
 function displayName(user: UserRecord): string {
@@ -334,6 +390,7 @@ async function handleCallback(
   query: TelegramCallbackQuery,
 ): Promise<void> {
   const chatId = String(query.message?.chat?.id ?? query.from.id);
+  const messageId = query.message?.message_id ?? null;
   const action: CallbackAction | null = query.data ? parseCallback(query.data) : null;
 
   await sender.answerCallbackQuery(query.id, undefined, false);
@@ -491,6 +548,56 @@ async function handleCallback(
       return;
     case "timezoneCustom":
       await handleTimezoneCustom(db, sender, chatId, query.from);
+      return;
+    case "habitsMenu":
+      await handleHabitsMenu(db, sender, chatId, query.from, messageId);
+      return;
+    case "habitAdd":
+      await handleHabitAdd(db, sender, chatId, query.from);
+      return;
+    case "habitTrack":
+      await handleHabitTracking(db, sender, chatId, query.from, messageId);
+      return;
+    case "habitDone":
+      await handleHabitDone(sender, chatId, messageId);
+      return;
+    case "habitNotNow":
+      await handleHabitNotNow(sender, chatId, messageId);
+      return;
+    case "habitDeleteMenu":
+      await handleHabitDeleteMenu(db, sender, chatId, query.from, messageId);
+      return;
+    case "habitDelete":
+      await handleHabitDelete(db, sender, chatId, query.from, action.id, messageId);
+      return;
+    case "habitDeleteConfirm":
+      await handleHabitDeleteConfirm(db, sender, chatId, query.from, action.id, messageId);
+      return;
+    case "habitToggle":
+      await handleHabitToggle(db, sender, chatId, query.from, action.id, action.completed, messageId);
+      return;
+    case "habitStats":
+      await handleHabitStats(db, sender, chatId, query.from, action.view, messageId);
+      return;
+    case "habitReminder":
+      await handleHabitReminder(db, sender, chatId, query.from, messageId);
+      return;
+    case "habitReminderHour":
+      await handleHabitReminderHour(sender, chatId, action.hour, messageId);
+      return;
+    case "habitReminderMinute":
+      await handleHabitReminderMinute(
+        db,
+        sender,
+        chatId,
+        query.from,
+        action.hour,
+        action.minute,
+        messageId,
+      );
+      return;
+    case "habitReminderDisable":
+      await handleHabitReminderDisable(db, sender, chatId, query.from, messageId);
       return;
     case "noop":
     default:
@@ -1295,6 +1402,322 @@ async function handleTimezoneCustom(
   await saveWorkflow(db, user.id, "AWAIT_TIMEZONE", { kind: "timezone", origin: "settings" }, messageId);
 }
 
+function userZone(user: UserRecord): string {
+  return user.timeZone && isValidTimeZone(user.timeZone) ? user.timeZone : "UTC";
+}
+
+async function renderHabitsMenu(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  user: UserRecord,
+  messageId: number | null,
+): Promise<void> {
+  const [habits, settings] = await Promise.all([
+    listActiveHabits(db, user.id),
+    getHabitReminderSettings(db, user.id),
+  ]);
+  const zone = userZone(user);
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    formatHabitList(habits, settings, zone),
+    habitsListKeyboard(habits.length > 0, settings.enabled),
+  );
+}
+
+async function handleHabitsMenu(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  await renderHabitsMenu(db, sender, chatId, user, messageId);
+}
+
+async function handleHabitAdd(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const messageId = await sendText(sender, chatId, ru.habits.addPrompt, cancelOnlyKeyboard());
+  await saveWorkflow(db, user.id, "AWAIT_TEXT", { kind: "habit_name" }, messageId);
+}
+
+async function handleHabitName(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  user: UserRecord,
+  text: string,
+): Promise<void> {
+  const validated = validateHabitName(text);
+  if (!validated.ok) {
+    await sendText(
+      sender,
+      chatId,
+      validated.reason === "empty" ? ru.habits.nameEmpty : ru.habits.nameTooLong(HABIT_NAME_MAX),
+      cancelOnlyKeyboard(),
+    );
+    return;
+  }
+
+  const habit = await createHabit(db, user.id, validated.name);
+  await deleteWorkflow(db, user.id);
+
+  const [habits, settings] = await Promise.all([
+    listActiveHabits(db, user.id),
+    getHabitReminderSettings(db, user.id),
+  ]);
+  const list = formatHabitList(habits, settings, userZone(user));
+  await sendText(
+    sender,
+    chatId,
+    `${ru.habits.created(escapeHtml(habit.name))}\n\n${list}`,
+    habitsListKeyboard(habits.length > 0, settings.enabled),
+  );
+}
+
+async function handleHabitDeleteMenu(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const habits = await listActiveHabits(db, user.id);
+  if (habits.length === 0) {
+    await editOrSend(sender, chatId, messageId, ru.habits.deleteEmpty, habitEmptyKeyboard());
+    return;
+  }
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    formatHabitDeleteList(habits),
+    habitDeleteListKeyboard(habits),
+  );
+}
+
+async function handleHabitDelete(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  id: string,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const habit = await getActiveHabitForUser(db, id, user.id);
+  if (!habit) {
+    await renderHabitsMenu(db, sender, chatId, user, messageId);
+    return;
+  }
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    formatHabitDeleteConfirmation(habit.name),
+    habitDeleteConfirmKeyboard(habit.id),
+  );
+}
+
+async function handleHabitDeleteConfirm(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  id: string,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const habit = await getActiveHabitForUser(db, id, user.id);
+  if (!habit) {
+    await renderHabitsMenu(db, sender, chatId, user, messageId);
+    return;
+  }
+
+  await softDeleteHabit(db, habit.id, user.id);
+  const [habits, settings] = await Promise.all([
+    listActiveHabits(db, user.id),
+    getHabitReminderSettings(db, user.id),
+  ]);
+  const list = formatHabitList(habits, settings, userZone(user));
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    `${ru.habits.deleted(escapeHtml(habit.name))}\n\n${list}`,
+    habitsListKeyboard(habits.length > 0, settings.enabled),
+  );
+}
+
+async function handleHabitTracking(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const today = todayInZone(userZone(user));
+  const habits = await listActiveHabitsWithCompletion(db, user.id, today);
+  if (habits.length === 0) {
+    await editOrSend(sender, chatId, messageId, ru.habits.trackingEmpty, habitEmptyKeyboard());
+    return;
+  }
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    formatHabitTracking(habits, today),
+    habitTrackingKeyboard(habits),
+  );
+}
+
+async function handleHabitToggle(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  id: string,
+  completed: boolean,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const today = todayInZone(userZone(user));
+  const result = await setHabitCompletion(db, user.id, id, today, completed);
+  const habits = await listActiveHabitsWithCompletion(db, user.id, today);
+
+  if (habits.length === 0) {
+    await editOrSend(sender, chatId, messageId, ru.habits.trackingEmpty, habitEmptyKeyboard());
+    return;
+  }
+
+  const prefix = result === "not_found" ? `${ru.habits.notFound}\n\n` : "";
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    `${prefix}${formatHabitTracking(habits, today)}`,
+    habitTrackingKeyboard(habits),
+  );
+}
+
+async function handleHabitDone(
+  sender: TelegramSender,
+  chatId: string,
+  messageId: number | null,
+): Promise<void> {
+  // Deliberately does not write completions: only explicitly toggled habits are marked.
+  await editOrSend(sender, chatId, messageId, ru.habits.done, menuKeyboard());
+}
+
+async function handleHabitNotNow(
+  sender: TelegramSender,
+  chatId: string,
+  messageId: number | null,
+): Promise<void> {
+  await editOrSend(sender, chatId, messageId, ru.habits.notNowDone, menuKeyboard());
+}
+
+async function handleHabitStats(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  view: "week" | "all",
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const stats = await getHabitStatistics(db, user.id, userZone(user));
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    formatHabitStats(stats, view),
+    habitStatsKeyboard(view),
+  );
+}
+
+async function handleHabitReminder(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const settings = await getHabitReminderSettings(db, user.id);
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    formatHabitReminderSettings(settings, userZone(user)),
+    habitReminderHoursKeyboard(settings.enabled),
+  );
+}
+
+async function handleHabitReminderHour(
+  sender: TelegramSender,
+  chatId: string,
+  hour: number,
+  messageId: number | null,
+): Promise<void> {
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    ru.habits.reminderChooseMinute(hour),
+    habitReminderMinutesKeyboard(hour),
+  );
+}
+
+async function handleHabitReminderMinute(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  hour: number,
+  minute: number,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const settings = await setHabitReminder(db, user.id, time);
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    ru.habits.reminderSaved(time, escapeHtml(userZone(user))),
+    habitReminderSettingsKeyboard(settings.enabled),
+  );
+}
+
+async function handleHabitReminderDisable(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  from: TelegramUser,
+  messageId: number | null,
+): Promise<void> {
+  const user = await upsertUser(db, from);
+  await disableHabitReminder(db, user.id);
+  await editOrSend(
+    sender,
+    chatId,
+    messageId,
+    ru.habits.reminderDisabled,
+    habitReminderSettingsKeyboard(false),
+  );
+}
+
 async function handleDraftText(
   db: Db,
   sender: TelegramSender,
@@ -1424,6 +1847,10 @@ async function handleMessage(
   }
   if (workflow.data.kind === "friend") {
     await handleFriendUsername(db, sender, chatId, user, trimmed);
+    return;
+  }
+  if (workflow.data.kind === "habit_name") {
+    await handleHabitName(db, sender, chatId, user, trimmed);
     return;
   }
   if (workflow.data.kind === "timezone") {

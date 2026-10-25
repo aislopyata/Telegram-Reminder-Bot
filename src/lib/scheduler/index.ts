@@ -14,6 +14,7 @@ import { TelegramApiError } from "@/lib/telegram/errors";
 import { logger } from "@/lib/logger";
 import { ru } from "@/lib/i18n/ru";
 import { escapeHtml } from "@/lib/telegram/html";
+import { processHabitRemindersOnce } from "./habits";
 
 const REMINDER_BATCH = 25;
 const DELIVERY_BATCH = 50;
@@ -28,6 +29,10 @@ export type SchedulerStats = {
   deliveriesPermanent: number;
   remindersCompleted: number;
   remindersAdvanced: number;
+  habitRemindersDue: number;
+  habitRemindersSent: number;
+  habitRemindersFailed: number;
+  habitRemindersSkipped: number;
 };
 
 type FetchedReminder = {
@@ -274,6 +279,10 @@ export async function processRemindersOnce(
     deliveriesPermanent: 0,
     remindersCompleted: 0,
     remindersAdvanced: 0,
+    habitRemindersDue: 0,
+    habitRemindersSent: 0,
+    habitRemindersFailed: 0,
+    habitRemindersSkipped: 0,
   };
 
   await releaseExpiredClaims(db, now);
@@ -315,6 +324,16 @@ export async function processRemindersOnce(
   }
 
   await syncOccurrenceStatuses(db);
+
+  try {
+    const habitStats = await processHabitRemindersOnce(db, sender, now);
+    stats.habitRemindersDue = habitStats.habitRemindersDue;
+    stats.habitRemindersSent = habitStats.habitRemindersSent;
+    stats.habitRemindersFailed = habitStats.habitRemindersFailed;
+    stats.habitRemindersSkipped = habitStats.habitRemindersSkipped;
+  } catch (error) {
+    logger.error("scheduler_habits_failed", error);
+  }
 
   return stats;
 }

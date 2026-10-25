@@ -5,6 +5,13 @@ import { escapeHtml } from "@/lib/telegram/html";
 import type { ReminderWithPeople } from "@/lib/services/reminders";
 import { friendRecipient } from "@/lib/services/reminders";
 import { ru } from "@/lib/i18n/ru";
+import { DateTime } from "luxon";
+import type {
+  Habit,
+  HabitReminderSettings,
+  HabitStatistics,
+  HabitWithCompletion,
+} from "@/lib/services/habits";
 
 function recipientLineDraft(draft: ReminderDraft, friendName?: string): string {
   if (draft.recipientMode === "FRIEND") {
@@ -145,4 +152,118 @@ export function formatReminderListLine(reminder: ReminderWithPeople, index: numb
 
 export function monthCells(year: number, month: number): Array<number | null> {
   return calendarDays(year, month);
+}
+
+export function formatHabitDate(date: string): string {
+  const parsed = DateTime.fromISO(date, { zone: "UTC" });
+  if (!parsed.isValid) return date;
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(parsed.toJSDate());
+}
+
+export function formatHabitWeekRange(start: string, end: string): string {
+  const from = DateTime.fromISO(start, { zone: "UTC" }).setLocale("ru");
+  const to = DateTime.fromISO(end, { zone: "UTC" }).setLocale("ru");
+  if (!from.isValid || !to.isValid) return `${start} — ${end}`;
+  if (from.month === to.month && from.year === to.year) {
+    return `${from.day}–${to.toFormat("d MMMM")}`;
+  }
+  return `${from.toFormat("d MMMM")} — ${to.toFormat("d MMMM")}`;
+}
+
+export function formatHabitList(
+  habits: Habit[],
+  settings: HabitReminderSettings,
+  zone: string,
+): string {
+  if (habits.length === 0) return ru.habits.empty;
+
+  const lines: string[] = [ru.habits.menuTitle, ""];
+  habits.forEach((habit, index) => {
+    lines.push(`${index + 1}. ${escapeHtml(habit.name)}`);
+  });
+  lines.push("");
+  lines.push(
+    settings.enabled && settings.reminderTime
+      ? ru.habits.reminderLine(settings.reminderTime, escapeHtml(zone))
+      : ru.habits.reminderLineOff,
+  );
+  return lines.join("\n");
+}
+
+export function formatHabitDeleteList(habits: Habit[]): string {
+  if (habits.length === 0) return ru.habits.deleteEmpty;
+  const lines: string[] = [ru.habits.deleteTitle, ""];
+  habits.forEach((habit, index) => {
+    lines.push(`${index + 1}. ${escapeHtml(habit.name)}`);
+  });
+  return lines.join("\n");
+}
+
+export function formatHabitDeleteConfirmation(name: string): string {
+  return ru.habits.deleteConfirm(escapeHtml(name));
+}
+
+export function formatHabitTracking(habits: HabitWithCompletion[], date: string): string {
+  if (habits.length === 0) return ru.habits.trackingEmpty;
+  const lines: string[] = [
+    ru.habits.trackingTitle,
+    "",
+    ru.habits.trackingDate(formatHabitDate(date)),
+    "",
+  ];
+  habits.forEach((habit, index) => {
+    lines.push(`${habit.completed ? "☑️" : "⬜️"} ${index + 1}. ${escapeHtml(habit.name)}`);
+  });
+  return lines.join("\n");
+}
+
+export function formatHabitStats(stats: HabitStatistics, view: "week" | "all"): string {
+  if (stats.habits.length === 0) return ru.habits.statsEmpty;
+
+  if (view === "week") {
+    const lines: string[] = [
+      ru.habits.statsWeeklyTitle,
+      formatHabitWeekRange(stats.weekStart, stats.weekEnd),
+      "",
+    ];
+    stats.habits.forEach((habit, index) => {
+      lines.push(
+        `${index + 1}. ${ru.habits.statsWeekLine(
+          escapeHtml(habit.name),
+          habit.weekCompleted,
+          habit.weekEligible,
+          habit.weekRate.toFixed(1),
+        )}`,
+      );
+    });
+    lines.push("");
+    lines.push(ru.habits.statsWeekNote);
+    return lines.join("\n");
+  }
+
+  const lines: string[] = [ru.habits.statsAllTimeTitle, ""];
+  stats.habits.forEach((habit, index) => {
+    lines.push(`${index + 1}. <b>${escapeHtml(habit.name)}</b>`);
+    lines.push(`   ${ru.habits.statsCreated(formatHabitDate(habit.createdDate))}`);
+    lines.push(`   ${ru.habits.statsCompleted(habit.totalCompleted)}`);
+    lines.push(`   ${ru.habits.statsPeriod(habit.totalEligible)}`);
+    lines.push(`   ${ru.habits.statsRate(habit.totalRate.toFixed(1))}`);
+    if (index < stats.habits.length - 1) lines.push("");
+  });
+  return lines.join("\n");
+}
+
+export function formatHabitReminderSettings(
+  settings: HabitReminderSettings,
+  zone: string,
+): string {
+  return [
+    ru.habits.reminderTitle,
+    "",
+    ru.habits.reminderCurrent(settings.reminderTime, settings.enabled, escapeHtml(zone)),
+  ].join("\n");
 }

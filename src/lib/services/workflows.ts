@@ -11,11 +11,13 @@ export const workflowDataSchema = z.union([
     kind: z.literal("timezone"),
     origin: z.enum(["onboarding", "settings"]),
   }),
+  z.object({ kind: z.literal("habit_name") }),
 ]);
 
 export type WorkflowData = z.infer<typeof workflowDataSchema>;
 export type DraftWorkflowData = Extract<WorkflowData, { kind: "draft" }>;
 export type TimezoneWorkflowData = Extract<WorkflowData, { kind: "timezone" }>;
+export type HabitNameWorkflowData = Extract<WorkflowData, { kind: "habit_name" }>;
 
 export const WORKFLOW_TTL_MS = 30 * 60 * 1000;
 

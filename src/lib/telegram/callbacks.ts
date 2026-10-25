@@ -69,6 +69,23 @@ export const cb = {
   settings: () => "s:menu",
   settingsTimezone: () => "s:tz",
 
+  habitsMenu: () => "h:menu",
+  habitAdd: () => "h:add",
+  habitTrack: () => "h:track",
+  habitDone: () => "h:done",
+  habitNotNow: () => "h:notnow",
+  habitDeleteMenu: () => "h:del",
+  habitDelete: (id: string) => `h:del:${id}`,
+  habitDeleteConfirm: (id: string) => `h:delc:${id}`,
+  habitToggle: (id: string, completed: boolean) => `h:t:${id}:${completed ? 1 : 0}`,
+  habitStats: () => "h:stats",
+  habitStatsWeek: () => "h:st:w",
+  habitStatsAll: () => "h:st:a",
+  habitReminder: () => "h:rem",
+  habitReminderHour: (hour: number) => `h:rh:${hour}`,
+  habitReminderMinute: (hour: number, minute: number) => `h:rm:${hour}:${minute}`,
+  habitReminderDisable: () => "h:rdis",
+
   timezones: (page: number) => `tz:${page}`,
   timezoneSet: (zone: string) => `tz:set:${zone}`,
   timezoneCustom: () => "tz:custom",
@@ -124,6 +141,20 @@ export type CallbackAction =
   | { type: "friendRemoveConfirm"; id: string }
   | { type: "settings" }
   | { type: "settingsTimezone" }
+  | { type: "habitsMenu" }
+  | { type: "habitAdd" }
+  | { type: "habitTrack" }
+  | { type: "habitDone" }
+  | { type: "habitNotNow" }
+  | { type: "habitDeleteMenu" }
+  | { type: "habitDelete"; id: string }
+  | { type: "habitDeleteConfirm"; id: string }
+  | { type: "habitToggle"; id: string; completed: boolean }
+  | { type: "habitStats"; view: "week" | "all" }
+  | { type: "habitReminder" }
+  | { type: "habitReminderHour"; hour: number }
+  | { type: "habitReminderMinute"; hour: number; minute: number }
+  | { type: "habitReminderDisable" }
   | { type: "timezones"; page: number }
   | { type: "timezoneSet"; zone: string }
   | { type: "timezoneCustom" };
@@ -180,6 +211,18 @@ export function parseCallback(data: string): CallbackAction | null {
   if (data === "f:add") return { type: "addFriend" };
   if (data === "s:menu") return { type: "settings" };
   if (data === "s:tz") return { type: "settingsTimezone" };
+  if (data === "h:menu") return { type: "habitsMenu" };
+  if (data === "h:add") return { type: "habitAdd" };
+  if (data === "h:track") return { type: "habitTrack" };
+  if (data === "h:done") return { type: "habitDone" };
+  if (data === "h:notnow") return { type: "habitNotNow" };
+  if (data === "h:del") return { type: "habitDeleteMenu" };
+  if (data === "h:stats" || data === "h:st:w") {
+    return { type: "habitStats", view: "week" };
+  }
+  if (data === "h:st:a") return { type: "habitStats", view: "all" };
+  if (data === "h:rem") return { type: "habitReminder" };
+  if (data === "h:rdis") return { type: "habitReminderDisable" };
   if (data === "tz:custom") return { type: "timezoneCustom" };
 
   let match = /^cal:day:(\d{1,2})$/.exec(data);
@@ -307,6 +350,32 @@ export function parseCallback(data: string): CallbackAction | null {
       default:
         return { type: "friendRemoveConfirm", id };
     }
+  }
+
+  match = /^h:delc:(\d{1,20})$/.exec(data);
+  if (match) return { type: "habitDeleteConfirm", id: match[1] };
+
+  match = /^h:del:(\d{1,20})$/.exec(data);
+  if (match) return { type: "habitDelete", id: match[1] };
+
+  match = /^h:t:(\d{1,20}):([01])$/.exec(data);
+  if (match) {
+    return { type: "habitToggle", id: match[1], completed: match[2] === "1" };
+  }
+
+  match = /^h:rh:(\d{1,2})$/.exec(data);
+  if (match) {
+    const hour = intInRange(match[1], 0, 23);
+    return hour === null ? null : { type: "habitReminderHour", hour };
+  }
+
+  match = /^h:rm:(\d{1,2}):(\d{1,2})$/.exec(data);
+  if (match) {
+    const hour = intInRange(match[1], 0, 23);
+    const minute = intInRange(match[2], 0, 59);
+    return hour === null || minute === null
+      ? null
+      : { type: "habitReminderMinute", hour, minute };
   }
 
   match = /^tz:(\d{1,3})$/.exec(data);

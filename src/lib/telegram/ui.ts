@@ -16,6 +16,8 @@ export function menuKeyboard() {
   return keyboard([
     row({ text: "➕ Создать напоминание", callback_data: cb.createType() }),
     row({ text: "📋 Мои напоминания", callback_data: cb.reminders(1) }),
+    row({ text: "✅ Мои привычки", callback_data: cb.habitsMenu() }),
+    row({ text: "📊 Статистика привычек", callback_data: cb.habitStats() }),
     row({ text: "👥 Друзья", callback_data: cb.friendsMenu() }),
     row({ text: "⚙️ Настройки", callback_data: cb.settings() }),
   ]);
@@ -362,4 +364,152 @@ export function timezoneListKeyboard(zones: string[], page: number) {
   rows.push(row({ text: "✍️ Ввести вручную", callback_data: cb.timezoneCustom() }));
   rows.push(row({ text: "⬅️ Назад", callback_data: cb.settings() }));
   return keyboard(rows);
+}
+
+export const HABIT_MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
+
+function shortenButtonLabel(value: string, maxUnits = 56): string {
+  let result = "";
+  for (const char of value) {
+    // Telegram limits button text in UTF-16 units; never split a surrogate pair.
+    if (result.length + char.length > maxUnits - 1) return `${result}…`;
+    result += char;
+  }
+  return result;
+}
+
+export function habitsListKeyboard(hasHabits: boolean, reminderEnabled: boolean) {
+  const rows: InlineButton[][] = [
+    row({ text: "➕ Добавить привычку", callback_data: cb.habitAdd() }),
+  ];
+  if (hasHabits) {
+    rows.push(row({ text: "✅ Отметить на сегодня", callback_data: cb.habitTrack() }));
+    rows.push(
+      row(
+        { text: "🗑 Удалить привычку", callback_data: cb.habitDeleteMenu() },
+        { text: "📊 Статистика", callback_data: cb.habitStats() },
+      ),
+    );
+  }
+  rows.push(
+    row({
+      text: reminderEnabled ? "⏰ Время трекинга" : "⏰ Настроить напоминание",
+      callback_data: cb.habitReminder(),
+    }),
+  );
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function habitEmptyKeyboard() {
+  return keyboard([
+    row({ text: "➕ Добавить привычку", callback_data: cb.habitAdd() }),
+    row({ text: "🏠 Главное меню", callback_data: cb.main() }),
+  ]);
+}
+
+export function habitDeleteListKeyboard(habits: Array<{ id: string; name: string }>) {
+  const buttons: InlineButton[] = habits.map((habit) => ({
+    text: `🗑 ${shortenButtonLabel(habit.name)}`,
+    callback_data: cb.habitDelete(habit.id),
+  }));
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < buttons.length; i += 3) {
+    rows.push(buttons.slice(i, i + 3));
+  }
+  rows.push(row({ text: "⬅️ К привычкам", callback_data: cb.habitsMenu() }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function habitDeleteConfirmKeyboard(habitId: string) {
+  return keyboard([
+    row({ text: "🗑 Да, удалить", callback_data: cb.habitDeleteConfirm(habitId) }),
+    row({ text: "⬅️ К привычкам", callback_data: cb.habitsMenu() }),
+  ]);
+}
+
+export function habitTrackingKeyboard(
+  habits: Array<{ id: string; name: string; completed: boolean }>,
+) {
+  const buttons: InlineButton[] = habits.map((habit) => ({
+    text: `${habit.completed ? "☑️" : "⬜️"} ${shortenButtonLabel(habit.name)}`,
+    callback_data: cb.habitToggle(habit.id, !habit.completed),
+  }));
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < buttons.length; i += 3) {
+    rows.push(buttons.slice(i, i + 3));
+  }
+  rows.push(row({ text: "✅ Готово на сегодня", callback_data: cb.habitDone() }));
+  rows.push(row({ text: "⬅️ К привычкам", callback_data: cb.habitsMenu() }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function habitPromptKeyboard() {
+  return keyboard([
+    row({ text: "✅ Отметить привычки", callback_data: cb.habitTrack() }),
+    row({ text: "❌ Не сейчас", callback_data: cb.habitNotNow() }),
+  ]);
+}
+
+export function habitReminderHoursKeyboard(reminderEnabled: boolean) {
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < HOURS.length; i += 4) {
+    rows.push(
+      HOURS.slice(i, i + 4).map((hour) => ({
+        text: String(hour).padStart(2, "0"),
+        callback_data: cb.habitReminderHour(hour),
+      })),
+    );
+  }
+  if (reminderEnabled) {
+    rows.push(
+      row({ text: "⏸ Выключить напоминание", callback_data: cb.habitReminderDisable() }),
+    );
+  }
+  rows.push(row({ text: "⬅️ К привычкам", callback_data: cb.habitsMenu() }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function habitReminderMinutesKeyboard(hour: number) {
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < HABIT_MINUTES.length; i += 4) {
+    rows.push(
+      HABIT_MINUTES.slice(i, i + 4).map((minute) => ({
+        text: String(minute).padStart(2, "0"),
+        callback_data: cb.habitReminderMinute(hour, minute),
+      })),
+    );
+  }
+  rows.push(row({ text: "⬅️ К выбору часа", callback_data: cb.habitReminder() }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function habitReminderSettingsKeyboard(reminderEnabled: boolean) {
+  const rows: InlineButton[][] = [
+    row({ text: "🕒 Изменить время", callback_data: cb.habitReminder() }),
+  ];
+  if (reminderEnabled) {
+    rows.push(
+      row({ text: "⏸ Выключить напоминание", callback_data: cb.habitReminderDisable() }),
+    );
+  }
+  rows.push(row({ text: "⬅️ К привычкам", callback_data: cb.habitsMenu() }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function habitStatsKeyboard(view: "week" | "all") {
+  return keyboard([
+    row(
+      view === "week"
+        ? { text: "🗓 Всё время", callback_data: cb.habitStatsAll() }
+        : { text: "📅 Эта неделя", callback_data: cb.habitStatsWeek() },
+    ),
+    row({ text: "⬅️ К привычкам", callback_data: cb.habitsMenu() }),
+    row({ text: "🏠 Главное меню", callback_data: cb.main() }),
+  ]);
 }

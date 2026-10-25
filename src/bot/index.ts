@@ -12,12 +12,23 @@ async function main(): Promise<void> {
 
   const bot = createBot();
 
+  let running = false;
   const run = async () => {
+    // Cron callbacks can overlap when a pass takes longer than a minute. The
+    // database still enforces per-day claims, but skipping here avoids duplicate
+    // work and duplicate "due" logs.
+    if (running) {
+      logger.warn("scheduled_processing_skipped_overlap");
+      return;
+    }
+    running = true;
     try {
       const stats = await runScheduledProcessing();
       logger.info("scheduled_processing_completed", stats as unknown as Record<string, unknown>);
     } catch (error) {
       logger.error("scheduled_processing_failed", error);
+    } finally {
+      running = false;
     }
   };
   schedule(SCHEDULE_EXPRESSION, run);

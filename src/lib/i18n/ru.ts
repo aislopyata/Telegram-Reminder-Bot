@@ -58,6 +58,18 @@ export const ru = {
     customTimezone: "✍️ Ввести пояс вручную",
     accept: "✅ Принять",
     reject: "❌ Отклонить",
+    habits: "✅ Мои привычки",
+    habitStats: "📊 Статистика привычек",
+    addHabit: "➕ Добавить привычку",
+    deleteHabit: "🗑 Удалить привычку",
+    trackHabits: "✅ Отметить на сегодня",
+    doneToday: "✅ Готово на сегодня",
+    notNow: "❌ Не сейчас",
+    statsWeek: "📅 Эта неделя",
+    statsAll: "🗓 Всё время",
+    habitReminder: "⏰ Время трекинга",
+    changeTime: "🕒 Изменить время",
+    disableHabitReminder: "⏸ Выключить напоминание",
   },
 
   weekdays: {
@@ -250,6 +262,65 @@ export const ru = {
         : `🔔 <b>Напоминание</b>\n\n${text}`,
     recipientRemoved: (friendName: string, preview: string) =>
       `⚠️ <b>Получатель больше не доступен</b>\n\n${friendName} больше не у вас в друзьях, поэтому совместное напоминание «${preview}» будет приходить только вам. Само напоминание сохранено.`,
+  },
+
+  habits: {
+    menuTitle: "✅ <b>Мои привычки</b>",
+    empty:
+      "✅ <b>Мои привычки</b>\n\nУ вас пока нет привычек. Создайте первую — и отмечайте её каждый день.",
+    created: (name: string) => `✅ Привычка «${name}» создана.`,
+    addPrompt:
+      "✍️ <b>Новая привычка</b>\n\nОтправьте название одним сообщением (до 100 символов). Например: «Утренняя пробежка».",
+    nameEmpty:
+      "Название привычки не может быть пустым. Отправьте название ещё раз.",
+    nameTooLong: (max: number) =>
+      `Название слишком длинное. Максимум ${max} символов.`,
+    nameInvalid: "Не удалось сохранить привычку. Попробуйте ещё раз.",
+    deleteTitle:
+      "🗑 <b>Удалить привычку</b>\n\nВыберите привычку. История отметок сохранится, но привычка исчезнет из трекинга и статистики.",
+    deleteEmpty: "Удалять пока нечего: у вас нет активных привычек.",
+    deleteConfirm: (name: string) =>
+      `🗑 Удалить привычку «${name}»?\n\nИстория отметок сохранится, но она перестанет появляться в трекинге и статистике.`,
+    deleted: (name: string) =>
+      `🗑 Привычка «${name}» удалена. История сохранена.`,
+    notFound: "Привычка не найдена или уже удалена.",
+    trackingTitle: "✅ <b>Отметьте привычки</b>",
+    trackingDate: (date: string) => `📅 ${date}`,
+    trackingEmpty:
+      "У вас нет активных привычек. Создайте привычку, чтобы начать трекинг.",
+    trackingSaved: "✅ Отметки сохранены.",
+    done: "✅ Готово на сегодня. Хорошего дня!",
+    notNowDone:
+      "Ок, скрыл напоминание. Отметить привычки можно в любой момент в разделе «Мои привычки».",
+    statsWeeklyTitle: "📊 <b>Статистика привычек — эта неделя</b>",
+    statsAllTimeTitle: "📊 <b>Статистика привычек — всё время</b>",
+    statsEmpty:
+      "📊 <b>Статистика привычек</b>\n\nПока нет активных привычек для статистики.",
+    statsWeekLine: (name: string, completed: number, eligible: number, percent: string) =>
+      `${name}: <b>${completed}/${eligible}</b> дн. (${percent}%)`,
+    statsWeekNote:
+      "Считаются только прошедшие дни недели, начиная с даты создания привычки.",
+    statsCreated: (date: string) => `Добавлена: ${date}`,
+    statsCompleted: (days: number) => `Отмечено: <b>${days}</b> дн.`,
+    statsPeriod: (days: number) => `Период: <b>${days}</b> дн.`,
+    statsRate: (percent: string) => `Процент: <b>${percent}%</b>`,
+    reminderTitle: "⏰ <b>Ежедневное напоминание</b>",
+    reminderCurrent: (time: string | null, enabled: boolean, zone: string) =>
+      enabled && time
+        ? `Текущее время: <b>${time}</b> (${zone})\nНапоминание включено.`
+        : "Напоминание выключено.",
+    reminderChooseHour:
+      "⏰ <b>Время трекинга</b>\n\nВыберите час, когда присылать напоминание.",
+    reminderChooseMinute: (hour: number) =>
+      `⏰ <b>Время трекинга</b>\n\nЧас: <b>${String(hour).padStart(2, "0")}</b>. Выберите минуты.`,
+    reminderSaved: (time: string, zone: string) =>
+      `✅ Напоминание включено: <b>${time}</b> (${zone}).`,
+    reminderDisabled: "⏸ Ежедневное напоминание выключено.",
+    reminderLine: (time: string, zone: string) =>
+      `⏰ Напоминание: <b>${time}</b> (${zone})`,
+    reminderLineOff: "⏰ Напоминание: выключено",
+    dailyPrompt:
+      "⏰ <b>Пора отметить привычки на сегодня!</b>\n\nНажмите «Отметить», чтобы открыть трекер.",
   },
 
   errors: {
