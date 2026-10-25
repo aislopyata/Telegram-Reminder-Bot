@@ -329,13 +329,24 @@ export async function listReminders(
   page: number,
 ): Promise<{ items: ReminderWithPeople[]; page: number; total: number; totalPages: number }> {
   const pageSize = REMINDERS_PAGE_SIZE;
-  const safePage = Math.max(1, page);
+
+  // Completed one-time reminders are history: the scheduler has already
+  // delivered them, so they no longer belong in the active list.
+  const countResult = await db.query<{ count: number }>(
+    `SELECT COUNT(*)::int AS count
+     FROM reminders
+     WHERE owner_id = $1 AND status <> 'COMPLETED'`,
+    [userId],
+  );
+  const total = Number(countResult.rows[0]?.count ?? 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
   const offset = (safePage - 1) * pageSize;
 
   const result = await db.query<ReminderRow>(
     `SELECT id, owner_id, text, type, recurrence_type, scheduled_at, local_time, time_zone, recurrence_days, next_run_at, status, created_at, updated_at
      FROM reminders
-     WHERE owner_id = $1
+     WHERE owner_id = $1 AND status <> 'COMPLETED'
      ORDER BY created_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, pageSize, offset],
@@ -344,13 +355,6 @@ export async function listReminders(
   const items: ReminderWithPeople[] = result.rows.map((row) =>
     toReminderWithPeople(row, []),
   );
-
-  const countResult = await db.query<{ count: number }>(
-    `SELECT COUNT(*)::int AS count FROM reminders WHERE owner_id = $1`,
-    [userId],
-  );
-  const total = Number(countResult.rows[0]?.count ?? 0);
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return { items, page: safePage, total, totalPages };
 }
