@@ -52,6 +52,7 @@ import {
   editTypeKeyboard,
   friendListKeyboard,
   friendRemoveConfirmKeyboard,
+  friendRequestNotificationKeyboard,
   friendSelectKeyboard,
   friendsMenuKeyboard,
   hourKeyboard,
@@ -1032,9 +1033,10 @@ async function notifyUser(
   sender: TelegramSender,
   telegramUserId: string,
   text: string,
+  reply?: InlineKeyboard,
 ): Promise<void> {
   try {
-    await sender.sendMessage(telegramUserId, text);
+    await sender.sendMessage(telegramUserId, text, reply);
   } catch (error) {
     logger.warn("telegram_notify_failed", {
       telegramUserId,
@@ -1352,6 +1354,7 @@ async function handleFriendUsername(
         sender,
         result.target.telegramUserId,
         ru.friends.requestReceived(escapeHtml(displayName(user))),
+        friendRequestNotificationKeyboard(result.request.id),
       );
       await sendText(
         sender,

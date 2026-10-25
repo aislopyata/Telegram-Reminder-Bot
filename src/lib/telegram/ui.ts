@@ -310,6 +310,15 @@ export function requestsKeyboard(
   return keyboard(rows);
 }
 
+export function friendRequestNotificationKeyboard(requestId: string) {
+  return keyboard([
+    row(
+      { text: "✅ Принять", callback_data: cb.friendAccept(requestId) },
+      { text: "❌ Отклонить", callback_data: cb.friendReject(requestId) },
+    ),
+  ]);
+}
+
 export function friendListKeyboard(friends: Array<{ id: string; firstName: string }>) {
   const rows: InlineButton[][] = friends.map((friend) => [
     { text: friend.firstName, callback_data: cb.noop() },

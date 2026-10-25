@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCallback, cb, CALLBACK_LIMIT } from "@/lib/telegram/callbacks";
+import { friendRequestNotificationKeyboard } from "@/lib/telegram/ui";
 import { nextWeeklyOccurrence, nextMonthlyOccurrence } from "@/lib/time";
 import { DateTime } from "luxon";
 
@@ -36,6 +37,16 @@ describe("telegram callbacks", () => {
     expect(parseCallback(cb.friendRemove("not-an-id"))).toBeNull();
     expect(parseCallback(cb.calendarPrev())).toEqual({ type: "calendar", direction: "prev" });
     expect(parseCallback(cb.monthDayPage(2))).toEqual({ type: "monthDayPage", page: 2 });
+  });
+
+  it("offers accept and reject buttons on an incoming friend request notification", () => {
+    const buttons = friendRequestNotificationKeyboard("42").inline_keyboard.flat();
+    expect(buttons).toEqual([
+      { text: "✅ Принять", callback_data: cb.friendAccept("42") },
+      { text: "❌ Отклонить", callback_data: cb.friendReject("42") },
+    ]);
+    expect(parseCallback(buttons[0].callback_data)).toEqual({ type: "friendAccept", id: "42" });
+    expect(parseCallback(buttons[1].callback_data)).toEqual({ type: "friendReject", id: "42" });
   });
 });
 
