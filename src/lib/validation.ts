@@ -3,6 +3,10 @@ import { isValidTimeZone } from "./time";
 
 export const REMINDER_TEXT_MAX = 1000;
 export const FRIEND_USERNAME_MAX = 32;
+export const LIST_NAME_MAX = 100;
+export const LIST_ITEM_TITLE_MAX = 200;
+export const LIST_ITEM_DESCRIPTION_MAX = 2000;
+export const LIST_ITEM_URL_MAX = 500;
 
 /**
  * Telegram usernames are case-insensitive and may be supplied with a leading
@@ -85,4 +89,55 @@ export function reminderValidationMessage(error: unknown): string {
   if (error instanceof z.ZodError) return error.issues[0]?.message ?? "Некорректные данные";
   if (error instanceof Error) return error.message;
   return "Некорректные данные";
+}
+
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * List names and task titles are stored as plain text: line breaks and long
+ * whitespace runs are collapsed, and Telegram HTML is escaped only at render
+ * time. This keeps the database free of presentation markup.
+ */
+export function normalizeListName(value: string): string | null {
+  const normalized = collapseWhitespace(value);
+  if (normalized.length === 0) return null;
+  return [...normalized].length <= LIST_NAME_MAX ? normalized : null;
+}
+
+export function normalizeListItemTitle(value: string): string | null {
+  const normalized = collapseWhitespace(value);
+  if (normalized.length === 0) return null;
+  return [...normalized].length <= LIST_ITEM_TITLE_MAX ? normalized : null;
+}
+
+/**
+ * Descriptions may span multiple lines, so line breaks are preserved. Empty
+ * input (or the single "-" convention used by the bot) means "no description".
+ */
+export function normalizeListItemDescription(value: string): string | null | "empty" {
+  const trimmed = value.replace(/\r\n/g, "\n").trim();
+  if (trimmed.length === 0 || trimmed === "-") return null;
+  if ([...trimmed].length > LIST_ITEM_DESCRIPTION_MAX) return "empty";
+  return trimmed;
+}
+
+/**
+ * Accept only absolute http(s) URLs. `javascript:`, `data:` and other schemes
+ * are rejected before the value ever reaches Telegram's HTML renderer.
+ */
+export function normalizeHttpUrl(value: string): string | null | "invalid" {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed === "-") return null;
+  if (trimmed.length > LIST_ITEM_URL_MAX) return "invalid";
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "invalid";
+    if (!url.hostname) return "invalid";
+    const normalized = url.toString();
+    return normalized.length <= LIST_ITEM_URL_MAX ? normalized : "invalid";
+  } catch {
+    return "invalid";
+  }
 }

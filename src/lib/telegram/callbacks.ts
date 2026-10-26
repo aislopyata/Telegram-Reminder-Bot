@@ -89,7 +89,48 @@ export const cb = {
   timezones: (page: number) => `tz:${page}`,
   timezoneSet: (zone: string) => `tz:set:${zone}`,
   timezoneCustom: () => "tz:custom",
+
+  todoMenu: () => "t:menu",
+  todoPage: (page: number) => `t:page:${page}`,
+  todoCreate: () => "t:new",
+  todoManage: () => "t:manage",
+  todoOpen: (id: string, page: number) => `t:open:${id}:${page}`,
+  todoAdd: (id: string) => `t:add:${id}`,
+  todoItem: (id: string, itemId: string) => `t:item:${id}:${itemId}`,
+  todoToggle: (id: string, itemId: string) => `t:toggle:${id}:${itemId}`,
+  todoDeleteItem: (id: string, itemId: string) => `t:del:${id}:${itemId}`,
+  todoDeleteItemConfirm: (id: string, itemId: string) => `t:delc:${id}:${itemId}`,
+  todoEditField: (id: string, itemId: string, field: "t" | "d" | "u") =>
+    `t:ef:${id}:${itemId}:${field}`,
+  todoRename: (id: string) => `t:ren:${id}`,
+  todoDeleteList: (id: string) => `t:dl:${id}`,
+  todoDeleteListConfirm: (id: string) => `t:dlc:${id}`,
+  todoShare: (id: string) => `t:share:${id}`,
+  todoShareFriend: (id: string, friendId: string) => `t:shf:${id}:${friendId}`,
+  todoSharePermission: (id: string, friendId: string, permission: "r" | "e") =>
+    `t:shp:${id}:${friendId}:${permission}`,
+  todoUnshare: (id: string, friendId: string) => `t:unsh:${id}:${friendId}`,
+
+  wishMenu: () => "w:menu",
+  wishPage: (page: number) => `w:page:${page}`,
+  wishCreate: () => "w:new",
+  wishManage: () => "w:manage",
+  wishOpen: (id: string, page: number) => `w:open:${id}:${page}`,
+  wishAdd: (id: string) => `w:add:${id}`,
+  wishItem: (id: string, itemId: string) => `w:item:${id}:${itemId}`,
+  wishDeleteItem: (id: string, itemId: string) => `w:del:${id}:${itemId}`,
+  wishDeleteItemConfirm: (id: string, itemId: string) => `w:delc:${id}:${itemId}`,
+  wishEditField: (id: string, itemId: string, field: "t" | "d" | "u") =>
+    `w:ef:${id}:${itemId}:${field}`,
+  wishRename: (id: string) => `w:ren:${id}`,
+  wishDeleteList: (id: string) => `w:dl:${id}`,
+  wishDeleteListConfirm: (id: string) => `w:dlc:${id}`,
+  wishShare: (id: string) => `w:share:${id}`,
+  wishShareFriend: (id: string, friendId: string) => `w:shf:${id}:${friendId}`,
+  wishUnshare: (id: string, friendId: string) => `w:unsh:${id}:${friendId}`,
 } as const;
+
+export type ListItemField = "title" | "description" | "url";
 
 export type CallbackAction =
   | { type: "main" }
@@ -157,7 +198,41 @@ export type CallbackAction =
   | { type: "habitReminderDisable" }
   | { type: "timezones"; page: number }
   | { type: "timezoneSet"; zone: string }
-  | { type: "timezoneCustom" };
+  | { type: "timezoneCustom" }
+  | { type: "todoMenu" }
+  | { type: "todoPage"; page: number }
+  | { type: "todoCreate" }
+  | { type: "todoManage" }
+  | { type: "todoOpen"; id: string; page: number }
+  | { type: "todoAdd"; id: string }
+  | { type: "todoItem"; id: string; itemId: string }
+  | { type: "todoToggle"; id: string; itemId: string }
+  | { type: "todoDeleteItem"; id: string; itemId: string }
+  | { type: "todoDeleteItemConfirm"; id: string; itemId: string }
+  | { type: "todoEditField"; id: string; itemId: string; field: ListItemField }
+  | { type: "todoRename"; id: string }
+  | { type: "todoDeleteList"; id: string }
+  | { type: "todoDeleteListConfirm"; id: string }
+  | { type: "todoShare"; id: string }
+  | { type: "todoShareFriend"; id: string; friendId: string }
+  | { type: "todoSharePermission"; id: string; friendId: string; permission: "READ" | "EDIT" }
+  | { type: "todoUnshare"; id: string; friendId: string }
+  | { type: "wishMenu" }
+  | { type: "wishPage"; page: number }
+  | { type: "wishCreate" }
+  | { type: "wishManage" }
+  | { type: "wishOpen"; id: string; page: number }
+  | { type: "wishAdd"; id: string }
+  | { type: "wishItem"; id: string; itemId: string }
+  | { type: "wishDeleteItem"; id: string; itemId: string }
+  | { type: "wishDeleteItemConfirm"; id: string; itemId: string }
+  | { type: "wishEditField"; id: string; itemId: string; field: ListItemField }
+  | { type: "wishRename"; id: string }
+  | { type: "wishDeleteList"; id: string }
+  | { type: "wishDeleteListConfirm"; id: string }
+  | { type: "wishShare"; id: string }
+  | { type: "wishShareFriend"; id: string; friendId: string }
+  | { type: "wishUnshare"; id: string; friendId: string };
 
 const ID_PATTERN = /^\d{1,20}$/;
 const ZONE_PATTERN = /^[A-Za-z0-9_+\-/]{1,50}$/;
@@ -176,6 +251,16 @@ function intInRange(raw: string | undefined, min: number, max: number): number |
   if (!raw || !/^\d{1,2}$/.test(raw)) return null;
   const value = Number(raw);
   return value >= min && value <= max ? value : null;
+}
+
+/** Reminder creation/editing only offers quarter-hour steps. */
+const SELECTABLE_MINUTES = new Set([0, 15, 30, 45]);
+
+function listField(raw: string | undefined): ListItemField | null {
+  if (raw === "t") return "title";
+  if (raw === "d") return "description";
+  if (raw === "u") return "url";
+  return null;
 }
 
 /**
@@ -224,6 +309,12 @@ export function parseCallback(data: string): CallbackAction | null {
   if (data === "h:rem") return { type: "habitReminder" };
   if (data === "h:rdis") return { type: "habitReminderDisable" };
   if (data === "tz:custom") return { type: "timezoneCustom" };
+  if (data === "t:menu") return { type: "todoMenu" };
+  if (data === "t:new") return { type: "todoCreate" };
+  if (data === "t:manage") return { type: "todoManage" };
+  if (data === "w:menu") return { type: "wishMenu" };
+  if (data === "w:new") return { type: "wishCreate" };
+  if (data === "w:manage") return { type: "wishManage" };
 
   let match = /^cal:day:(\d{1,2})$/.exec(data);
   if (match) {
@@ -240,7 +331,9 @@ export function parseCallback(data: string): CallbackAction | null {
   match = /^time:m:(\d{1,2})$/.exec(data);
   if (match) {
     const minute = intInRange(match[1], 0, 59);
-    return minute === null ? null : { type: "selectMinute", minute };
+    return minute === null || !SELECTABLE_MINUTES.has(minute)
+      ? null
+      : { type: "selectMinute", minute };
   }
 
   match = /^wd:(\d)$/.exec(data);
@@ -390,6 +483,91 @@ export function parseCallback(data: string): CallbackAction | null {
     if (zone.length > 50 || !ZONE_PATTERN.test(zone)) return null;
     return { type: "timezoneSet", zone };
   }
+
+  // ToDo lists
+  match = /^t:page:(\d{1,3})$/.exec(data);
+  if (match) {
+    const page = positivePage(match[1]);
+    return page === null ? null : { type: "todoPage", page };
+  }
+  match = /^t:open:(\d{1,20}):(\d{1,3})$/.exec(data);
+  if (match) {
+    const page = positivePage(match[2]);
+    return page === null ? null : { type: "todoOpen", id: match[1], page };
+  }
+  match = /^t:add:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoAdd", id: match[1] };
+  match = /^t:item:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoItem", id: match[1], itemId: match[2] };
+  match = /^t:toggle:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoToggle", id: match[1], itemId: match[2] };
+  match = /^t:del:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoDeleteItem", id: match[1], itemId: match[2] };
+  match = /^t:delc:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoDeleteItemConfirm", id: match[1], itemId: match[2] };
+  match = /^t:ef:(\d{1,20}):(\d{1,20}):([tdu])$/.exec(data);
+  if (match) {
+    const field = listField(match[3]);
+    return field === null ? null : { type: "todoEditField", id: match[1], itemId: match[2], field };
+  }
+  match = /^t:ren:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoRename", id: match[1] };
+  match = /^t:dl:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoDeleteList", id: match[1] };
+  match = /^t:dlc:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoDeleteListConfirm", id: match[1] };
+  match = /^t:share:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoShare", id: match[1] };
+  match = /^t:shf:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoShareFriend", id: match[1], friendId: match[2] };
+  match = /^t:shp:(\d{1,20}):(\d{1,20}):([re])$/.exec(data);
+  if (match) {
+    return {
+      type: "todoSharePermission",
+      id: match[1],
+      friendId: match[2],
+      permission: match[3] === "e" ? "EDIT" : "READ",
+    };
+  }
+  match = /^t:unsh:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoUnshare", id: match[1], friendId: match[2] };
+
+  // Wish lists (read-only sharing)
+  match = /^w:page:(\d{1,3})$/.exec(data);
+  if (match) {
+    const page = positivePage(match[1]);
+    return page === null ? null : { type: "wishPage", page };
+  }
+  match = /^w:open:(\d{1,20}):(\d{1,3})$/.exec(data);
+  if (match) {
+    const page = positivePage(match[2]);
+    return page === null ? null : { type: "wishOpen", id: match[1], page };
+  }
+  match = /^w:add:(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishAdd", id: match[1] };
+  match = /^w:item:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishItem", id: match[1], itemId: match[2] };
+  match = /^w:del:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishDeleteItem", id: match[1], itemId: match[2] };
+  match = /^w:delc:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishDeleteItemConfirm", id: match[1], itemId: match[2] };
+  match = /^w:ef:(\d{1,20}):(\d{1,20}):([tdu])$/.exec(data);
+  if (match) {
+    const field = listField(match[3]);
+    return field === null ? null : { type: "wishEditField", id: match[1], itemId: match[2], field };
+  }
+  match = /^w:ren:(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishRename", id: match[1] };
+  match = /^w:dl:(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishDeleteList", id: match[1] };
+  match = /^w:dlc:(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishDeleteListConfirm", id: match[1] };
+  match = /^w:share:(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishShare", id: match[1] };
+  match = /^w:shf:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishShareFriend", id: match[1], friendId: match[2] };
+  match = /^w:unsh:(\d{1,20}):(\d{1,20})$/.exec(data);
+  if (match) return { type: "wishUnshare", id: match[1], friendId: match[2] };
 
   return null;
 }

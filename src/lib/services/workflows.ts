@@ -4,6 +4,9 @@ import type { WorkflowState } from "@/generated/prisma/client";
 import { draftSchema } from "@/lib/bot/draft";
 import { logger } from "@/lib/logger";
 
+const workflowIdSchema = z.string().regex(/^\d{1,20}$/);
+const listItemFieldSchema = z.enum(["title", "description", "url"]);
+
 export const workflowDataSchema = z.union([
   z.object({ kind: z.literal("draft"), draft: draftSchema }),
   z.object({ kind: z.literal("friend") }),
@@ -12,12 +15,42 @@ export const workflowDataSchema = z.union([
     origin: z.enum(["onboarding", "settings"]),
   }),
   z.object({ kind: z.literal("habit_name") }),
+  z.object({
+    kind: z.literal("todo_list_name"),
+    listId: workflowIdSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal("wish_list_name"),
+    listId: workflowIdSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal("todo_item_form"),
+    mode: z.enum(["create", "edit"]),
+    listId: workflowIdSchema,
+    itemId: workflowIdSchema.optional(),
+    step: listItemFieldSchema,
+    title: z.string().optional(),
+    description: z.string().nullable().optional(),
+  }),
+  z.object({
+    kind: z.literal("wish_item_form"),
+    mode: z.enum(["create", "edit"]),
+    listId: workflowIdSchema,
+    itemId: workflowIdSchema.optional(),
+    step: listItemFieldSchema,
+    title: z.string().optional(),
+    description: z.string().nullable().optional(),
+  }),
 ]);
 
 export type WorkflowData = z.infer<typeof workflowDataSchema>;
 export type DraftWorkflowData = Extract<WorkflowData, { kind: "draft" }>;
 export type TimezoneWorkflowData = Extract<WorkflowData, { kind: "timezone" }>;
 export type HabitNameWorkflowData = Extract<WorkflowData, { kind: "habit_name" }>;
+export type TodoListNameWorkflowData = Extract<WorkflowData, { kind: "todo_list_name" }>;
+export type WishListNameWorkflowData = Extract<WorkflowData, { kind: "wish_list_name" }>;
+export type TodoItemFormWorkflowData = Extract<WorkflowData, { kind: "todo_item_form" }>;
+export type WishItemFormWorkflowData = Extract<WorkflowData, { kind: "wish_item_form" }>;
 
 export const WORKFLOW_TTL_MS = 30 * 60 * 1000;
 

@@ -55,8 +55,15 @@ import {
   type ReminderDraft,
 } from "@/lib/bot/draft";
 import { GrammyTelegramSender } from "@/lib/telegram/api";
+import { PrimaryUiSender } from "@/lib/telegram/primaryUi";
 import { escapeHtml } from "@/lib/telegram/html";
 import { ru } from "@/lib/i18n/ru";
+import {
+  handleListCallback,
+  handleListWorkflowText,
+  isListCallback,
+  isListWorkflow,
+} from "./lists";
 import {
   calendarKeyboard,
   cancelOnlyKeyboard,
@@ -397,6 +404,11 @@ async function handleCallback(
 
   if (!action) {
     await sendText(sender, chatId, ru.common.unknownAction);
+    return;
+  }
+
+  if (isListCallback(action)) {
+    await handleListCallback(db, sender, query, action);
     return;
   }
 
@@ -1841,6 +1853,11 @@ async function handleMessage(
     return;
   }
 
+  if (isListWorkflow(workflow)) {
+    await handleListWorkflowText(db, sender, chatId, user, workflow, trimmed);
+    return;
+  }
+
   if (workflow.data.kind === "draft") {
     await handleDraftText(db, sender, chatId, user, workflow, trimmed);
     return;
@@ -1863,13 +1880,30 @@ export async function handleTelegramUpdate(
   update: TelegramUpdate,
   sender: TelegramSender = new GrammyTelegramSender(),
 ): Promise<void> {
+  const actor = update.callback_query?.from ?? update.message?.from;
+  const primaryChatId = update.callback_query
+    ? String(update.callback_query.message?.chat?.id ?? update.callback_query.from.id)
+    : update.message
+      ? String(update.message.chat?.id ?? update.message.from?.id ?? "")
+      : "";
+
+  // Routine UI updates edit the persisted primary message; notifications sent
+  // to other chats and the scheduler's own sender remain untouched.
+  const effectiveSender: TelegramSender =
+    actor && primaryChatId
+      ? new PrimaryUiSender(db, sender, primaryChatId, async () => {
+          const user = await upsertUser(db, actor);
+          return user.id;
+        })
+      : sender;
+
   try {
     if (update.callback_query) {
-      await handleCallback(db, sender, update.callback_query);
+      await handleCallback(db, effectiveSender, update.callback_query);
       return;
     }
     if (update.message) {
-      await handleMessage(db, sender, update.message);
+      await handleMessage(db, effectiveSender, update.message);
     }
   } catch (error) {
     logger.error("telegram_update_failed", error, {
@@ -1883,7 +1917,7 @@ export async function handleTelegramUpdate(
         : "";
     if (chatId) {
       try {
-        await sender.sendMessage(chatId, ru.common.internalError, menuKeyboard());
+        await effectiveSender.sendMessage(chatId, ru.common.internalError, menuKeyboard());
       } catch {
         // ignore secondary failure
       }

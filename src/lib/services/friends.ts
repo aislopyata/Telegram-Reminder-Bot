@@ -359,6 +359,25 @@ export async function removeFriend(
       [pairKey(userId, friendUserId)],
     );
 
+    // Shared lists are only accessible between confirmed friends. Revoke both
+    // directions so neither side keeps read or edit access after removal.
+    await client.query(
+      `DELETE FROM todo_list_shares s
+       USING todo_lists l
+       WHERE s.list_id = l.id
+         AND ((l.owner_user_id = $1 AND s.shared_with_user_id = $2)
+           OR (l.owner_user_id = $2 AND s.shared_with_user_id = $1))`,
+      [userId, friendUserId],
+    );
+    await client.query(
+      `DELETE FROM wish_list_shares s
+       USING wish_lists l
+       WHERE s.list_id = l.id
+         AND ((l.owner_user_id = $1 AND s.shared_with_user_id = $2)
+           OR (l.owner_user_id = $2 AND s.shared_with_user_id = $1))`,
+      [userId, friendUserId],
+    );
+
     // Remove the former friend only from the *other* side of each shared
     // reminder: the owner must keep receiving their own reminder.
     const shared = await client.query<{ id: string; owner_id: string; text: string }>(
