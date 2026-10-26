@@ -203,10 +203,41 @@ function trimUrlPunctuation(raw: string): string {
 /** Drop separators left behind when a URL is removed from the title. */
 function trimTitleEdges(value: string): string {
   return value
-    .replace(/^[\s\-–—:|,]+/, "")
-    .replace(/[\s\-–—:|,]+$/, "")
+    .replace(/^[\s\-–—:|,)\]}]+/, "")
+    .replace(/[\s\-–—:|,([{]+$/, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const URL_WRAPPERS: Record<string, string> = {
+  "(": ")",
+  "[": "]",
+  "{": "}",
+};
+
+/**
+ * Remove a URL from the surrounding text. Markdown links often look like
+ * "Купить (https://example.com)" — after removing the URL the opening bracket
+ * must not stay in the title.
+ */
+function removeUrlFromTitle(content: string, match: RegExpExecArray): string {
+  const before = content.slice(0, match.index);
+  const after = content.slice(match.index + match[0].length);
+  let titleBefore = before;
+  let titleAfter = after;
+
+  const opener = /[([{]\s*$/.exec(before);
+  if (opener) {
+    const open = opener[0].trim();
+    const close = URL_WRAPPERS[open];
+    const afterTrimmed = after.replace(/^\s+/, "");
+    if (close && (match[0].endsWith(close) || afterTrimmed.startsWith(close))) {
+      titleBefore = before.slice(0, opener.index);
+      titleAfter = afterTrimmed.startsWith(close) ? afterTrimmed.slice(1) : after;
+    }
+  }
+
+  return trimTitleEdges(`${titleBefore} ${titleAfter}`);
 }
 
 /**
@@ -238,9 +269,7 @@ export function parseBulkListText(input: string): BulkListParseResult {
         return;
       }
       url = normalized;
-      content = trimTitleEdges(
-        `${content.slice(0, match.index)} ${content.slice(match.index + match[0].length)}`,
-      );
+      content = removeUrlFromTitle(content, match);
     } else {
       content = content.replace(/\s+/g, " ").trim();
     }

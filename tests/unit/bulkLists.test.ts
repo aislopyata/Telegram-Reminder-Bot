@@ -136,6 +136,31 @@ describe("bulk list parsing", () => {
     ]);
   });
 
+  it("removes wrapping brackets around URLs", () => {
+    const parsed = parseBulkListText(
+      [
+        "MacBook Pro 14″ — Купить на imagic.by (https://imagic.by/product/macbook/)",
+        "Rolex (реплика) | 376 BYN | Купить на chasy5.by (https://chasy5.by/products/daytona)",
+        "See (https://example.com/details) for details",
+        "[https://example.com/only-link]",
+      ].join("\n"),
+    );
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.items).toEqual([
+      {
+        title: "MacBook Pro 14″ — Купить на imagic.by",
+        url: "https://imagic.by/product/macbook/",
+      },
+      {
+        title: "Rolex (реплика) | 376 BYN | Купить на chasy5.by",
+        url: "https://chasy5.by/products/daytona",
+      },
+      { title: "See for details", url: "https://example.com/details" },
+      { title: "https://example.com/only-link", url: "https://example.com/only-link" },
+    ]);
+  });
+
   it("reports over-limit and invalid lines with original line numbers", () => {
     const longTitle = "x".repeat(LIST_ITEM_TITLE_MAX + 1);
     const parsed = parseBulkListText(

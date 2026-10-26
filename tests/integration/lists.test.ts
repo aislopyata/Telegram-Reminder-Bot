@@ -559,6 +559,23 @@ integration("todo and wish list integration", () => {
     expect(items[1].url).toBe("https://shop.example/book");
   });
 
+  it("shows the first new items after a bulk add larger than one page", async () => {
+    const sender = new InMemoryTelegramSender();
+    const wish = await createWishList(db, userA.id, "Подарки");
+
+    await runUpdate(db, sender, callbackUpdate(TG_A, cb.wishAdd(wish.id)));
+    const text = Array.from({ length: 11 }, (_, index) => `Подарок ${index + 1}`).join("\n");
+    const result = await runUpdate(db, sender, messageUpdate(TG_A, text));
+
+    expect(result.last?.text).toContain("Добавлено желаний: 11");
+    expect(result.last?.text).toContain("Подарок 1");
+    expect(result.last?.text).not.toContain("Подарок 11");
+
+    const items = (await listWishItems(db, wish.id, userA.id))?.items ?? [];
+    expect(items).toHaveLength(11);
+    expect(items[10].title).toBe("Подарок 11");
+  });
+
   it("enforces permissions and reports invalid bulk lines without losing valid ones", async () => {
     const sender = new InMemoryTelegramSender();
     const todo = await ensureDefaultTodoList(db, userA.id);

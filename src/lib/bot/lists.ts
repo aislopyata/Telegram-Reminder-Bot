@@ -1245,7 +1245,10 @@ async function handleBulkListText(
     }
 
     const pageSize = isTodo ? TODO_ITEM_PAGE_SIZE : WISH_ITEM_PAGE_SIZE;
-    const page = Math.max(1, Math.ceil(listData.items.length / pageSize));
+    // Show the page with the first new item, not the last page. Otherwise a
+    // batch larger than one page appears as a single last item.
+    const firstNewIndex = Math.max(0, listData.items.length - created.length);
+    const page = Math.floor(firstNewIndex / pageSize) + 1;
     const summary = bulkSummary(isTodo, created.length, parsed.errors);
     if (isTodo) {
       await renderTodoList(db, sender, chatId, user, data.listId, page, summary);
