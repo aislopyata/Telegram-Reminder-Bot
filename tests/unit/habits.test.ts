@@ -12,7 +12,12 @@ import {
 } from "@/lib/habits/stats";
 import { validateHabitName } from "@/lib/services/habits";
 import { formatHabitDate, formatHabitWeekRange } from "@/lib/telegram/render";
-import { habitTrackingKeyboard, habitDeleteListKeyboard, menuKeyboard } from "@/lib/telegram/ui";
+import {
+  habitsListKeyboard,
+  habitTrackingKeyboard,
+  habitDeleteListKeyboard,
+  menuKeyboard,
+} from "@/lib/telegram/ui";
 
 describe("habit name validation", () => {
   it("trims and collapses whitespace", () => {
@@ -110,11 +115,17 @@ describe("habit formatting", () => {
 });
 
 describe("habit callbacks", () => {
-  it("adds habit navigation to the main menu", () => {
-    const buttons = menuKeyboard().inline_keyboard.flat();
-    const callbacks = buttons.map((button) => button.callback_data);
+  it("keeps habit navigation in the main menu and statistics inside the habits section", () => {
+    const callbacks = menuKeyboard()
+      .inline_keyboard.flat()
+      .map((button) => button.callback_data);
     expect(callbacks).toContain(cb.habitsMenu());
-    expect(callbacks).toContain(cb.habitStats());
+    expect(callbacks).not.toContain(cb.habitStats());
+
+    const habitCallbacks = habitsListKeyboard(true, false)
+      .inline_keyboard.flat()
+      .map((button) => button.callback_data);
+    expect(habitCallbacks).toContain(cb.habitStats());
   });
 
   it("encodes callbacks with desired completion state", () => {

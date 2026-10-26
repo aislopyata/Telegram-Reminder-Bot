@@ -967,7 +967,12 @@ async function handleRemindersList(
   const user = await upsertUser(db, from);
   const result = await listReminders(db, user.id, page);
   if (result.total === 0) {
-    await sendText(sender, chatId, ru.reminders.listEmpty, menuKeyboard());
+    await sendText(
+      sender,
+      chatId,
+      ru.reminders.listEmpty,
+      reminderListKeyboard(result.items, result.page, result.totalPages),
+    );
     return;
   }
   const lines = result.items.map((reminder, index) =>

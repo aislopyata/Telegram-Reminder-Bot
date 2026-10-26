@@ -16,14 +16,18 @@ export function keyboard(rows: InlineButton[][]): InlineKeyboard {
 
 export function menuKeyboard() {
   return keyboard([
-    row({ text: "➕ Создать напоминание", callback_data: cb.createType() }),
-    row({ text: "📋 Мои напоминания", callback_data: cb.reminders(1) }),
-    row({ text: "✅ Мои привычки", callback_data: cb.habitsMenu() }),
-    row({ text: "📊 Статистика привычек", callback_data: cb.habitStats() }),
-    row({ text: "📝 Списки задач", callback_data: cb.todoMenu() }),
-    row({ text: "🎁 Списки желаний", callback_data: cb.wishMenu() }),
-    row({ text: "👥 Друзья", callback_data: cb.friendsMenu() }),
-    row({ text: "⚙️ Настройки", callback_data: cb.settings() }),
+    row(
+      { text: "📋 Мои напоминания", callback_data: cb.reminders(1) },
+      { text: "✅ Мои привычки", callback_data: cb.habitsMenu() },
+    ),
+    row(
+      { text: "📝 Списки задач", callback_data: cb.todoMenu() },
+      { text: "🎁 Списки желаний", callback_data: cb.wishMenu() },
+    ),
+    row(
+      { text: "👥 Друзья", callback_data: cb.friendsMenu() },
+      { text: "⚙️ Настройки", callback_data: cb.settings() },
+    ),
   ]);
 }
 
@@ -241,15 +245,23 @@ export function reminderListKeyboard(
   page: number,
   totalPages: number,
 ) {
-  const rows: InlineButton[][] = items.map((item, index) => [
-    { text: `${index + 1 + (page - 1) * 5}. Открыть`, callback_data: cb.reminderView(item.id, page) },
-  ]);
+  const rows: InlineButton[][] = [
+    row({ text: "➕ Создать напоминание", callback_data: cb.createType() }),
+    ...items.map((item, index) => [
+      {
+        text: `${index + 1 + (page - 1) * 5}. Открыть`,
+        callback_data: cb.reminderView(item.id, page),
+      },
+    ]),
+  ];
 
-  const nav: InlineButton[] = [];
-  if (page > 1) nav.push({ text: "⬅️", callback_data: cb.reminders(page - 1) });
-  nav.push({ text: `${page}/${totalPages}`, callback_data: cb.noop() });
-  if (page < totalPages) nav.push({ text: "➡️", callback_data: cb.reminders(page + 1) });
-  if (nav.length) rows.push(nav);
+  if (totalPages > 1) {
+    const nav: InlineButton[] = [];
+    if (page > 1) nav.push({ text: "⬅️", callback_data: cb.reminders(page - 1) });
+    nav.push({ text: `${page}/${totalPages}`, callback_data: cb.noop() });
+    if (page < totalPages) nav.push({ text: "➡️", callback_data: cb.reminders(page + 1) });
+    rows.push(nav);
+  }
 
   rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
   return keyboard(rows);
