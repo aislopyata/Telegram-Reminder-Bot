@@ -14,6 +14,7 @@ import {
   TODO_ITEM_PAGE_SIZE,
   TODO_PAGE_SIZE,
   addTodoItem,
+  addTodoItems,
   canEditTodoList,
   createTodoList,
   deleteTodoItem,
@@ -34,6 +35,7 @@ import {
   WISH_PAGE_SIZE,
   WishListServiceError,
   addWishItem,
+  addWishItems,
   createWishList,
   deleteWishItem,
   deleteWishList,
@@ -51,8 +53,10 @@ import { listFriends } from "@/lib/services/friends";
 import {
   deleteWorkflow,
   saveWorkflow,
+  type TodoItemBulkWorkflowData,
   type TodoItemFormWorkflowData,
   type TodoListNameWorkflowData,
+  type WishItemBulkWorkflowData,
   type WishItemFormWorkflowData,
   type WishListNameWorkflowData,
 } from "@/lib/services/workflows";
@@ -88,12 +92,15 @@ import {
   wishSharesKeyboard,
 } from "@/lib/telegram/ui";
 import {
+  LIST_BULK_MAX_ITEMS,
   LIST_ITEM_DESCRIPTION_MAX,
   LIST_ITEM_TITLE_MAX,
   LIST_NAME_MAX,
   normalizeHttpUrl,
   normalizeListItemDescription,
   normalizeListItemTitle,
+  parseBulkListText,
+  type BulkListLineError,
 } from "@/lib/validation";
 import { logger } from "@/lib/logger";
 
@@ -150,7 +157,9 @@ export function isListWorkflow(workflow: LoadedWorkflow): boolean {
     workflow.data.kind === "todo_list_name" ||
     workflow.data.kind === "wish_list_name" ||
     workflow.data.kind === "todo_item_form" ||
-    workflow.data.kind === "wish_item_form"
+    workflow.data.kind === "wish_item_form" ||
+    workflow.data.kind === "todo_item_bulk" ||
+    workflow.data.kind === "wish_item_bulk"
   );
 }
 
@@ -506,14 +515,14 @@ export async function handleListCallback(
       const messageId = await send(
         sender,
         chatId,
-        ru.lists.todoAddTitlePrompt,
+        ru.lists.todoBulkPrompt,
         cancelOnlyKeyboard(),
       );
       await saveWorkflow(
         db,
         user.id,
         LIST_STATE,
-        { kind: "todo_item_form", mode: "create", listId: list.id, step: "title" },
+        { kind: "todo_item_bulk", listId: list.id },
         messageId,
       );
       return;
@@ -531,14 +540,14 @@ export async function handleListCallback(
       const messageId = await send(
         sender,
         chatId,
-        ru.lists.wishAddTitlePrompt,
+        ru.lists.wishBulkPrompt,
         cancelOnlyKeyboard(),
       );
       await saveWorkflow(
         db,
         user.id,
         LIST_STATE,
-        { kind: "wish_item_form", mode: "create", listId: list.id, step: "title" },
+        { kind: "wish_item_bulk", listId: list.id },
         messageId,
       );
       return;
@@ -1155,6 +1164,104 @@ async function handleItemFormText(
   }
 }
 
+type BulkWorkflowData = TodoItemBulkWorkflowData | WishItemBulkWorkflowData;
+
+function bulkPrompt(isTodo: boolean): string {
+  return isTodo ? ru.lists.todoBulkPrompt : ru.lists.wishBulkPrompt;
+}
+
+function bulkErrorLines(errors: BulkListLineError[]): string[] {
+  const shown = errors.slice(0, 10);
+  const lines = shown.map((error) =>
+    error.reason === "title_too_long"
+      ? `• ${ru.lists.bulkTitleTooLong(error.line, LIST_ITEM_TITLE_MAX)}`
+      : `• ${ru.lists.bulkInvalidUrl(error.line)}`,
+  );
+  if (errors.length > shown.length) {
+    lines.push(ru.lists.bulkSkippedMore(errors.length - shown.length));
+  }
+  return lines;
+}
+
+function bulkSummary(
+  isTodo: boolean,
+  added: number,
+  errors: BulkListLineError[],
+): string {
+  const lines = [isTodo ? ru.lists.bulkAddedTodo(added) : ru.lists.bulkAddedWish(added)];
+  if (errors.length > 0) {
+    lines.push("", ru.lists.bulkSkippedTitle, ...bulkErrorLines(errors));
+  }
+  return lines.join("\n");
+}
+
+async function handleBulkListText(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  user: UserRecord,
+  data: BulkWorkflowData,
+  text: string,
+): Promise<void> {
+  const isTodo = data.kind === "todo_item_bulk";
+  const parsed = parseBulkListText(text);
+
+  if (parsed.limitExceeded) {
+    await send(
+      sender,
+      chatId,
+      `${ru.lists.bulkTooMany(LIST_BULK_MAX_ITEMS)}\n\n${bulkPrompt(isTodo)}`,
+      cancelOnlyKeyboard(),
+    );
+    return;
+  }
+
+  if (parsed.items.length === 0) {
+    const details =
+      parsed.errors.length > 0
+        ? `\n\n${ru.lists.bulkSkippedTitle}\n${bulkErrorLines(parsed.errors).join("\n")}`
+        : "";
+    await send(
+      sender,
+      chatId,
+      `${ru.lists.bulkNoItems}${details}\n\n${bulkPrompt(isTodo)}`,
+      cancelOnlyKeyboard(),
+    );
+    return;
+  }
+
+  try {
+    const created = isTodo
+      ? await addTodoItems(db, data.listId, user.id, parsed.items)
+      : await addWishItems(db, data.listId, user.id, parsed.items);
+    await deleteWorkflow(db, user.id);
+
+    const listData = isTodo
+      ? await listTodoItems(db, data.listId, user.id)
+      : await listWishItems(db, data.listId, user.id);
+    if (!listData) {
+      await send(sender, chatId, ru.lists.notFound, todoOverviewKeyboard([], 1, 1));
+      return;
+    }
+
+    const pageSize = isTodo ? TODO_ITEM_PAGE_SIZE : WISH_ITEM_PAGE_SIZE;
+    const page = Math.max(1, Math.ceil(listData.items.length / pageSize));
+    const summary = bulkSummary(isTodo, created.length, parsed.errors);
+    if (isTodo) {
+      await renderTodoList(db, sender, chatId, user, data.listId, page, summary);
+    } else {
+      await renderWishList(db, sender, chatId, user, data.listId, page, summary);
+    }
+  } catch (error) {
+    await send(
+      sender,
+      chatId,
+      `${errorMessage(error)}\n\n${bulkPrompt(isTodo)}`,
+      cancelOnlyKeyboard(),
+    );
+  }
+}
+
 export async function handleListWorkflowText(
   db: Db,
   sender: TelegramSender,
@@ -1170,6 +1277,10 @@ export async function handleListWorkflowText(
   }
   if (data.kind === "todo_item_form" || data.kind === "wish_item_form") {
     await handleItemFormText(db, sender, chatId, user, data, text);
+    return true;
+  }
+  if (data.kind === "todo_item_bulk" || data.kind === "wish_item_bulk") {
+    await handleBulkListText(db, sender, chatId, user, data, text);
     return true;
   }
   return false;

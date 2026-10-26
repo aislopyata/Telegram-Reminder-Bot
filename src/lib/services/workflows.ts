@@ -41,6 +41,14 @@ export const workflowDataSchema = z.union([
     title: z.string().optional(),
     description: z.string().nullable().optional(),
   }),
+  z.object({
+    kind: z.literal("todo_item_bulk"),
+    listId: workflowIdSchema,
+  }),
+  z.object({
+    kind: z.literal("wish_item_bulk"),
+    listId: workflowIdSchema,
+  }),
 ]);
 
 export type WorkflowData = z.infer<typeof workflowDataSchema>;
@@ -51,6 +59,8 @@ export type TodoListNameWorkflowData = Extract<WorkflowData, { kind: "todo_list_
 export type WishListNameWorkflowData = Extract<WorkflowData, { kind: "wish_list_name" }>;
 export type TodoItemFormWorkflowData = Extract<WorkflowData, { kind: "todo_item_form" }>;
 export type WishItemFormWorkflowData = Extract<WorkflowData, { kind: "wish_item_form" }>;
+export type TodoItemBulkWorkflowData = Extract<WorkflowData, { kind: "todo_item_bulk" }>;
+export type WishItemBulkWorkflowData = Extract<WorkflowData, { kind: "wish_item_bulk" }>;
 
 export const WORKFLOW_TTL_MS = 30 * 60 * 1000;
 

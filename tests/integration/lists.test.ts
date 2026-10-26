@@ -9,6 +9,7 @@ import { upsertUser, type UserRecord } from "@/lib/services/users";
 import {
   ListServiceError,
   addTodoItem,
+  addTodoItems,
   createTodoList,
   deleteTodoItem,
   deleteTodoList,
@@ -27,6 +28,7 @@ import {
 import {
   WishListServiceError,
   addWishItem,
+  addWishItems,
   createWishList,
   deleteWishItem,
   deleteWishList,
@@ -341,6 +343,55 @@ integration("todo and wish list integration", () => {
     expect(await getWishListForUser(db, list.id, userB.id)).toBeNull();
   });
 
+  it("bulk-inserts list items atomically and enforces permissions", async () => {
+    const todo = await ensureDefaultTodoList(db, userA.id);
+    const created = await addTodoItems(db, todo.id, userA.id, [
+      { title: "  Первая  ", url: "https://example.com/a" },
+      { title: "Вторая" },
+    ]);
+    expect(created.map((item) => item.title)).toEqual(["Первая", "Вторая"]);
+    expect(created[0].url).toBe("https://example.com/a");
+    expect((await listTodoItems(db, todo.id, userA.id))?.items.map((item) => item.title)).toEqual([
+      "Первая",
+      "Вторая",
+    ]);
+
+    // A failure on the second item rolls the first insert back.
+    await expect(
+      addTodoItems(db, todo.id, userA.id, [
+        { title: "Третья" },
+        { title: "x".repeat(201) },
+      ]),
+    ).rejects.toMatchObject({ code: "INVALID_TITLE" });
+    expect((await listTodoItems(db, todo.id, userA.id))?.items.map((item) => item.title)).toEqual([
+      "Первая",
+      "Вторая",
+    ]);
+
+    await befriend(userA.id, userB.id);
+    await shareTodoList(db, todo.id, userA.id, userB.id, "READ");
+    await expect(
+      addTodoItems(db, todo.id, userB.id, [{ title: "Нельзя" }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await shareTodoList(db, todo.id, userA.id, userB.id, "EDIT");
+    const addedByFriend = await addTodoItems(db, todo.id, userB.id, [{ title: "Добавлено другом" }]);
+    expect(addedByFriend.map((item) => item.title)).toEqual(["Добавлено другом"]);
+
+    const wish = await createWishList(db, userA.id, "Подарки");
+    const wishItems = await addWishItems(db, wish.id, userA.id, [
+      { title: "Наушники", url: "https://shop.example/item" },
+      { title: "Книга" },
+    ]);
+    expect(wishItems.map((item) => item.title)).toEqual(["Наушники", "Книга"]);
+    expect(wishItems[0].url).toBe("https://shop.example/item");
+
+    expect(await shareWishList(db, wish.id, userA.id, userB.id)).toBe("shared");
+    await expect(
+      addWishItems(db, wish.id, userB.id, [{ title: "Нельзя" }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("revokes shared list access in both directions when a friendship is removed", async () => {
     await befriend(userA.id, userB.id);
     const aTodo = await createTodoList(db, userA.id, "Задачи A");
@@ -403,32 +454,18 @@ integration("todo and wish list integration", () => {
     expect(sender.sent).toHaveLength(2);
   });
 
-  it("runs the ToDo add, edit, complete and delete flow through the UI", async () => {
+  it("opens the multiline add flow by default and supports edit, complete and delete", async () => {
     const sender = new InMemoryTelegramSender();
     const list = await ensureDefaultTodoList(db, userA.id);
 
     let result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoAdd(list.id)));
-    expect(result.last?.text).toContain("Новая задача");
+    expect(result.last?.text).toContain("по одной на строку");
 
-    result = await runUpdate(db, sender, messageUpdate(TG_A, "  Купить <молоко> & хлеб "));
-    expect(result.last?.text).toContain("Описание");
-
-    result = await runUpdate(db, sender, messageUpdate(TG_A, "2 литра\nи батон"));
-    expect(result.last?.text).toContain("Ссылка");
-
-    result = await runUpdate(
-      db,
-      sender,
-      messageUpdate(TG_A, " https://example.com/milk?a=1&b=2 "),
-    );
-    expect(result.last?.text).toContain("<b>Купить &lt;молоко&gt; &amp; хлеб</b>");
-    expect(result.last?.text).toContain(
-      '<a href="https://example.com/milk?a=1&amp;b=2">https://example.com/milk?a=1&amp;b=2</a>',
-    );
-
-    const items = (await listTodoItems(db, list.id, userA.id))?.items ?? [];
-    expect(items).toHaveLength(1);
-    const item = items[0];
+    const item = await addTodoItem(db, list.id, userA.id, {
+      title: "Купить <молоко> & хлеб",
+      description: "2 литра",
+      url: "https://example.com/milk?a=1&b=2",
+    });
 
     result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoToggle(list.id, item.id)));
     expect(result.last?.text).toContain("☑️ Выполнено");
@@ -451,6 +488,138 @@ integration("todo and wish list integration", () => {
     expect((await listTodoItems(db, list.id, userA.id))?.items).toEqual([]);
   });
 
+  it("bulk-adds ToDo items from a pasted multiline message", async () => {
+    const sender = new InMemoryTelegramSender();
+    const list = await ensureDefaultTodoList(db, userA.id);
+
+    let result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoAdd(list.id)));
+    expect(result.last?.text).toContain("по одной на строку");
+
+    result = await runUpdate(
+      db,
+      sender,
+      messageUpdate(
+        TG_A,
+        [
+          "",
+          "1. Buy a keyboard",
+          "2) Get running shoes - https://example.com/shoes",
+          "- Read a book about AI",
+          "* Exercise daily",
+          "[x] Learn TypeScript",
+          "",
+        ].join("\n"),
+      ),
+    );
+
+    expect(result.last?.text).toContain("Добавлено задач: 5");
+    expect(result.last?.text).toContain("Buy a keyboard");
+    expect(result.last?.text).toContain(
+      '<a href="https://example.com/shoes">https://example.com/shoes</a>',
+    );
+
+    const items = (await listTodoItems(db, list.id, userA.id))?.items ?? [];
+    expect(items.map((item) => item.title)).toEqual([
+      "Buy a keyboard",
+      "Get running shoes",
+      "Read a book about AI",
+      "Exercise daily",
+      "Learn TypeScript",
+    ]);
+    expect(items[1].url).toBe("https://example.com/shoes");
+    const state = await db.query(`SELECT 1 FROM conversation_states WHERE user_id = $1`, [
+      userA.id,
+    ]);
+    expect(state.rowCount).toBe(0);
+  });
+
+  it("bulk-adds Wish List items from a pasted multiline message", async () => {
+    const sender = new InMemoryTelegramSender();
+    const wish = await createWishList(db, userA.id, "Подарки");
+
+    let result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.wishAdd(wish.id)));
+    expect(result.last?.text).toContain("по одному на строку");
+
+    result = await runUpdate(
+      db,
+      sender,
+      messageUpdate(
+        TG_A,
+        ["1. Наушники", "- Книга - https://shop.example/book", "", "• Кофемолка"].join("\n"),
+      ),
+    );
+
+    expect(result.last?.text).toContain("Добавлено желаний: 3");
+    expect(result.last?.text).toContain(
+      '<a href="https://shop.example/book">https://shop.example/book</a>',
+    );
+
+    const items = (await listWishItems(db, wish.id, userA.id))?.items ?? [];
+    expect(items.map((item) => item.title)).toEqual(["Наушники", "Книга", "Кофемолка"]);
+    expect(items[1].url).toBe("https://shop.example/book");
+  });
+
+  it("enforces permissions and reports invalid bulk lines without losing valid ones", async () => {
+    const sender = new InMemoryTelegramSender();
+    const todo = await ensureDefaultTodoList(db, userA.id);
+    const wish = await createWishList(db, userA.id, "Подарки");
+    await befriend(userA.id, userB.id);
+    await shareTodoList(db, todo.id, userA.id, userB.id, "READ");
+    await shareWishList(db, wish.id, userA.id, userB.id);
+
+    let result = await runUpdate(db, sender, callbackUpdate(TG_B, cb.todoAdd(todo.id)));
+    expect(result.last?.text).toContain("нет прав");
+
+    result = await runUpdate(db, sender, callbackUpdate(TG_B, cb.wishAdd(wish.id)));
+    expect(result.last?.text).toContain("нет прав");
+
+    result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoAdd(todo.id)));
+    expect(result.last?.text).toContain("по одной на строку");
+
+    result = await runUpdate(
+      db,
+      sender,
+      messageUpdate(
+        TG_A,
+        ["Valid one", "x".repeat(201), "Bad http://?", "Valid two"].join("\n"),
+      ),
+    );
+
+    expect(result.last?.text).toContain("Добавлено задач: 2");
+    expect(result.last?.text).toContain("строка 2");
+    expect(result.last?.text).toContain("строка 3");
+    const items = (await listTodoItems(db, todo.id, userA.id))?.items ?? [];
+    expect(items.map((item) => item.title)).toEqual(["Valid one", "Valid two"]);
+  });
+
+  it("keeps the bulk prompt when no valid items are found", async () => {
+    const sender = new InMemoryTelegramSender();
+    const list = await ensureDefaultTodoList(db, userA.id);
+
+    await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoAdd(list.id)));
+    const result = await runUpdate(db, sender, messageUpdate(TG_A, "1.\n- \n[ ]"));
+
+    expect(result.last?.text).toContain("Не найдено ни одного элемента");
+    expect(result.last?.text).toContain("по одной на строку");
+    expect((await listTodoItems(db, list.id, userA.id))?.items).toEqual([]);
+    const state = await db.query(`SELECT 1 FROM conversation_states WHERE user_id = $1`, [
+      userA.id,
+    ]);
+    expect(state.rowCount).toBe(1);
+  });
+
+  it("rejects oversized bulk messages without saving anything", async () => {
+    const sender = new InMemoryTelegramSender();
+    const list = await ensureDefaultTodoList(db, userA.id);
+
+    await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoAdd(list.id)));
+    const text = Array.from({ length: 101 }, (_, index) => `Задача ${index + 1}`).join("\n");
+    const result = await runUpdate(db, sender, messageUpdate(TG_A, text));
+
+    expect(result.last?.text).toContain("Слишком много элементов");
+    expect((await listTodoItems(db, list.id, userA.id))?.items).toEqual([]);
+  });
+
   it("creates a wish list and item through the UI", async () => {
     const sender = new InMemoryTelegramSender();
 
@@ -466,13 +635,14 @@ integration("todo and wish list integration", () => {
     if (!wish) throw new Error("wish list was not created");
 
     result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.wishAdd(wish.id)));
-    expect(result.last?.text).toContain("Новое желание");
+    expect(result.last?.text).toContain("по одному на строку");
 
-    result = await runUpdate(db, sender, messageUpdate(TG_A, "Наушники"));
-    expect(result.last?.text).toContain("Описание");
-    result = await runUpdate(db, sender, messageUpdate(TG_A, "-"));
-    expect(result.last?.text).toContain("Ссылка");
-    result = await runUpdate(db, sender, messageUpdate(TG_A, "https://shop.example/item"));
+    result = await runUpdate(
+      db,
+      sender,
+      messageUpdate(TG_A, "Наушники https://shop.example/item"),
+    );
+    expect(result.last?.text).toContain("Добавлено желаний: 1.");
     expect(result.last?.text).toContain("<b>Наушники</b>");
     expect(result.last?.text).toContain('<a href="https://shop.example/item">');
 

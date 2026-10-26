@@ -311,6 +311,56 @@ export async function addWishItem(
   return mapItem(row);
 }
 
+/**
+ * Insert several items atomically. Wish lists only allow the owner; every
+ * title/URL is validated inside the transaction so partial batches roll back.
+ */
+export async function addWishItems(
+  db: Db,
+  listId: string,
+  userId: string,
+  items: Array<{ title: string; url?: string | null }>,
+): Promise<WishItem[]> {
+  if (items.length === 0) return [];
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const listResult = await client.query<ListRow>(
+      `${LIST_SELECT}
+       WHERE l.id = $1 AND (l.owner_user_id = $2 OR s.shared_with_user_id = $2)
+       LIMIT 1`,
+      [listId, userId],
+    );
+    const listRow = listResult.rows[0];
+    if (!listRow) throw new WishListServiceError("NOT_FOUND");
+    if (!canEditWishList(mapList(listRow))) throw new WishListServiceError("FORBIDDEN");
+
+    const created: WishItem[] = [];
+    for (const input of items) {
+      const title = normalizeTitle(input.title);
+      const url = normalizeUrl(input.url);
+      const inserted = await client.query<ItemRow>(
+        `INSERT INTO wish_list_items (list_id, title, description, url, created_at, updated_at)
+         VALUES ($1, $2, NULL, $3, now(), now())
+         RETURNING id, list_id, title, description, url, created_at, updated_at`,
+        [listId, title, url],
+      );
+      const row = inserted.rows[0];
+      if (!row) throw new WishListServiceError("NOT_FOUND");
+      created.push(mapItem(row));
+    }
+
+    await client.query("COMMIT");
+    return created;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getWishItemForUser(
   db: Db,
   listId: string,

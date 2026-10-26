@@ -1854,6 +1854,13 @@ async function handleMessage(
   }
 
   if (!trimmed) {
+    if (
+      isListWorkflow(workflow) &&
+      (workflow.data.kind === "todo_item_bulk" || workflow.data.kind === "wish_item_bulk")
+    ) {
+      await handleListWorkflowText(db, sender, chatId, user, workflow, rawText);
+      return;
+    }
     await sendText(sender, chatId, ru.common.onlyText);
     return;
   }

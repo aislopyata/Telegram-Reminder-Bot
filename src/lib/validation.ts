@@ -7,6 +7,7 @@ export const LIST_NAME_MAX = 100;
 export const LIST_ITEM_TITLE_MAX = 200;
 export const LIST_ITEM_DESCRIPTION_MAX = 2000;
 export const LIST_ITEM_URL_MAX = 500;
+export const LIST_BULK_MAX_ITEMS = 100;
 
 /**
  * Telegram usernames are case-insensitive and may be supplied with a leading
@@ -140,4 +141,125 @@ export function normalizeHttpUrl(value: string): string | null | "invalid" {
   } catch {
     return "invalid";
   }
+}
+
+export type BulkListItem = {
+  title: string;
+  url: string | null;
+};
+
+export type BulkListLineError = {
+  line: number;
+  reason: "title_too_long" | "invalid_url";
+};
+
+export type BulkListParseResult = {
+  items: BulkListItem[];
+  errors: BulkListLineError[];
+  totalLines: number;
+  limitExceeded: boolean;
+};
+
+/**
+ * Recognized copy/paste markers are only stripped at the start of a line.
+ * Numeric markers require whitespace (or end of line) so values like "12.5 kg"
+ * and "2024. Year in review" keep their leading numbers.
+ */
+const LEADING_LIST_MARKER =
+  /^(?:\d{1,3}[.)](?:\s+|$)|[-*](?:\s+|$)|[•☐□]\s*|\[\s*[xX]?\s*\]\s*)/;
+
+const HTTP_URL_PATTERN = /https?:\/\/[^\s<>"']+/i;
+
+function stripLeadingListMarkers(raw: string): string {
+  let value = raw.trimStart();
+  // Handle stacked styles such as "1. [ ] Task" without touching text later
+  // in the line.
+  for (let index = 0; index < 8; index += 1) {
+    const next = value.replace(LEADING_LIST_MARKER, "");
+    if (next === value) break;
+    value = next.trimStart();
+  }
+  return value.trim();
+}
+
+/** Remove sentence punctuation and unbalanced closing brackets from a URL. */
+function trimUrlPunctuation(raw: string): string {
+  let value = raw;
+  while (/[.,;:!?]$/.test(value)) value = value.slice(0, -1);
+  for (const [open, close] of [
+    ["(", ")"],
+    ["[", "]"],
+  ] as const) {
+    while (value.endsWith(close)) {
+      const opens = value.split(open).length - 1;
+      const closes = value.split(close).length - 1;
+      if (closes <= opens) break;
+      value = value.slice(0, -1);
+    }
+  }
+  return value;
+}
+
+/** Drop separators left behind when a URL is removed from the title. */
+function trimTitleEdges(value: string): string {
+  return value
+    .replace(/^[\s\-–—:|,]+/, "")
+    .replace(/[\s\-–—:|,]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Parse one multiline Telegram message into independent list items.
+ *
+ * Empty and marker-only lines are ignored. The first http(s) URL on a line is
+ * extracted into the item's `url` field so the renderer can keep it clickable;
+ * the remaining text becomes the title. Invalid or over-limit lines are
+ * reported with their original one-based line number instead of being silently
+ * discarded.
+ */
+export function parseBulkListText(input: string): BulkListParseResult {
+  const lines = input.replace(/\r\n?/g, "\n").split("\n");
+  const items: BulkListItem[] = [];
+  const errors: BulkListLineError[] = [];
+
+  lines.forEach((rawLine, index) => {
+    const line = index + 1;
+    const cleaned = stripLeadingListMarkers(rawLine);
+    if (!cleaned) return;
+
+    let content = cleaned;
+    let url: string | null = null;
+    const match = HTTP_URL_PATTERN.exec(content);
+    if (match) {
+      const normalized = normalizeHttpUrl(trimUrlPunctuation(match[0]));
+      if (normalized === "invalid") {
+        errors.push({ line, reason: "invalid_url" });
+        return;
+      }
+      url = normalized;
+      content = trimTitleEdges(
+        `${content.slice(0, match.index)} ${content.slice(match.index + match[0].length)}`,
+      );
+    } else {
+      content = content.replace(/\s+/g, " ").trim();
+    }
+
+    // A line containing only a URL still becomes a valid item.
+    const title = content || url;
+    if (!title) return;
+    if ([...title].length > LIST_ITEM_TITLE_MAX) {
+      errors.push({ line, reason: "title_too_long" });
+      return;
+    }
+    items.push({ title, url });
+  });
+
+  const limitExceeded = items.length > LIST_BULK_MAX_ITEMS;
+  return {
+    items: limitExceeded ? [] : items,
+    errors,
+    totalLines: lines.length,
+    limitExceeded,
+  };
 }

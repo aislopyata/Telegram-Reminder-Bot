@@ -301,6 +301,56 @@ export async function addTodoItem(
   return mapItem(row);
 }
 
+/**
+ * Insert several items atomically. Permissions and every title/URL are checked
+ * inside the transaction, so a failure on item N rolls back items 1..N-1 too.
+ */
+export async function addTodoItems(
+  db: Db,
+  listId: string,
+  userId: string,
+  items: Array<{ title: string; url?: string | null }>,
+): Promise<TodoItem[]> {
+  if (items.length === 0) return [];
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const listResult = await client.query<ListRow>(
+      `${LIST_SELECT}
+       WHERE l.id = $1 AND (l.owner_user_id = $2 OR s.shared_with_user_id = $2)
+       LIMIT 1`,
+      [listId, userId],
+    );
+    const listRow = listResult.rows[0];
+    if (!listRow) throw new ListServiceError("NOT_FOUND");
+    if (!canEditTodoList(mapList(listRow))) throw new ListServiceError("FORBIDDEN");
+
+    const created: TodoItem[] = [];
+    for (const input of items) {
+      const title = normalizeTitle(input.title);
+      const url = normalizeUrl(input.url);
+      const inserted = await client.query<ItemRow>(
+        `INSERT INTO todo_items (list_id, title, description, url, is_completed, created_at, updated_at)
+         VALUES ($1, $2, NULL, $3, false, now(), now())
+         RETURNING id, list_id, title, description, url, is_completed, created_at, updated_at`,
+        [listId, title, url],
+      );
+      const row = inserted.rows[0];
+      if (!row) throw new ListServiceError("NOT_FOUND");
+      created.push(mapItem(row));
+    }
+
+    await client.query("COMMIT");
+    return created;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getTodoItemForUser(
   db: Db,
   listId: string,
