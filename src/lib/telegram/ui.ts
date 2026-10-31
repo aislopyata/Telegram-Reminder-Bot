@@ -134,6 +134,7 @@ export function calendarKeyboard(
   month: number,
   selectedDate: string | null,
   cells: Array<number | null>,
+  minDate: string | null = null,
 ) {
   const labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   const header = labels.map((label) => ({ text: label, callback_data: cb.noop() }));
@@ -145,8 +146,12 @@ export function calendarKeyboard(
       week.push({ text: "·", callback_data: cb.noop() });
     } else {
       const date = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(cell).padStart(2, "0")}`;
-      const mark = selectedDate === date ? "✓ " : "";
-      week.push({ text: `${mark}${cell}`, callback_data: cb.selectDay(cell) });
+      const disabled = minDate !== null && date < minDate;
+      const mark = selectedDate === date && !disabled ? "✓ " : "";
+      week.push({
+        text: `${mark}${cell}`,
+        callback_data: disabled ? cb.noop() : cb.selectDay(cell),
+      });
     }
 
     if (week.length === 7) {
@@ -156,22 +161,27 @@ export function calendarKeyboard(
   }
   if (week.length) rows.push(week);
 
+  const label = monthKey(year, month);
+  const minMonth = minDate ? minDate.slice(0, 7) : null;
   rows.push([
-    { text: "⬅️", callback_data: cb.calendarPrev() },
-    { text: `${monthKey(year, month)}`, callback_data: cb.noop() },
+    {
+      text: "⬅️",
+      callback_data: minMonth !== null && label <= minMonth ? cb.noop() : cb.calendarPrev(),
+    },
+    { text: label, callback_data: cb.noop() },
     { text: "➡️", callback_data: cb.calendarNext() },
   ]);
   rows.push(row({ text: "✖️ Отмена", callback_data: cb.cancelWorkflow() }));
   return keyboard(rows);
 }
 
-export function hourKeyboard() {
+export function hourKeyboard(minHour = 0) {
   const rows: InlineButton[][] = [];
   for (let i = 0; i < HOURS.length; i += 4) {
     rows.push(
       HOURS.slice(i, i + 4).map((hour) => ({
         text: String(hour).padStart(2, "0"),
-        callback_data: cb.selectHour(hour),
+        callback_data: hour < minHour ? cb.noop() : cb.selectHour(hour),
       })),
     );
   }
@@ -179,11 +189,11 @@ export function hourKeyboard() {
   return keyboard(rows);
 }
 
-export function minuteKeyboard(hour: number) {
+export function minuteKeyboard(hour: number, minMinute = 0) {
   const rows: InlineButton[][] = [
     MINUTES.map((minute) => ({
       text: String(minute).padStart(2, "0"),
-      callback_data: cb.selectMinute(minute),
+      callback_data: minute < minMinute ? cb.noop() : cb.selectMinute(minute),
     })),
     [
       { text: `Час ${String(hour).padStart(2, "0")}`, callback_data: cb.noop() },
@@ -590,8 +600,58 @@ export function todoListKeyboard(
   if (totalPages > 1) rows.push(pageNav(page, totalPages, (next) => cb.todoOpen(list.id, next)));
   if (list.role === "OWNER") {
     rows.push(row({ text: "🔗 Поделиться", callback_data: cb.todoShare(list.id) }));
+    rows.push(
+      row({ text: "⏰ Ежедневное напоминание", callback_data: cb.todoReminder(list.id) }),
+    );
   }
   rows.push(row({ text: "⬅️ К спискам", callback_data: cb.todoMenu() }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function todoReminderSettingsKeyboard(listId: string, enabled: boolean) {
+  return keyboard([
+    row({
+      text: enabled ? "🕒 Изменить время" : "⏰ Включить напоминание",
+      callback_data: cb.todoReminder(listId),
+    }),
+    ...(enabled
+      ? [row({ text: "⏸ Выключить напоминание", callback_data: cb.todoReminderDisable(listId) })]
+      : []),
+    row({ text: "⬅️ К списку", callback_data: cb.todoOpen(listId, 1) }),
+    row({ text: "🏠 Главное меню", callback_data: cb.main() }),
+  ]);
+}
+
+export function todoReminderHoursKeyboard(listId: string, enabled: boolean) {
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < HOURS.length; i += 4) {
+    rows.push(
+      HOURS.slice(i, i + 4).map((hour) => ({
+        text: String(hour).padStart(2, "0"),
+        callback_data: cb.todoReminderHour(listId, hour),
+      })),
+    );
+  }
+  if (enabled) {
+    rows.push(row({ text: "⏸ Выключить напоминание", callback_data: cb.todoReminderDisable(listId) }));
+  }
+  rows.push(row({ text: "⬅️ К напоминанию", callback_data: cb.todoReminder(listId) }));
+  rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
+  return keyboard(rows);
+}
+
+export function todoReminderMinutesKeyboard(listId: string, hour: number) {
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < HABIT_MINUTES.length; i += 4) {
+    rows.push(
+      HABIT_MINUTES.slice(i, i + 4).map((minute) => ({
+        text: String(minute).padStart(2, "0"),
+        callback_data: cb.todoReminderMinute(listId, hour, minute),
+      })),
+    );
+  }
+  rows.push(row({ text: "⬅️ К выбору часа", callback_data: cb.todoReminder(listId) }));
   rows.push(row({ text: "🏠 Главное меню", callback_data: cb.main() }));
   return keyboard(rows);
 }

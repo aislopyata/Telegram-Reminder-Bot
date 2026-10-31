@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db";
 import { areFriends } from "./friends";
+import { parseLocalTime } from "@/lib/time";
 import { LIST_ITEM_DESCRIPTION_MAX, LIST_ITEM_URL_MAX, LIST_NAME_MAX, LIST_ITEM_TITLE_MAX } from "@/lib/validation";
 
 export const TODO_PAGE_SIZE = 6;
@@ -38,6 +39,14 @@ export type TodoShare = {
   createdAt: Date;
 };
 
+export type TodoListReminderSettings = {
+  listId: string;
+  enabled: boolean;
+  reminderTime: string | null;
+  lastNotifiedDate: string | null;
+  updatedAt: Date | null;
+};
+
 export class ListServiceError extends Error {
   constructor(
     public readonly code:
@@ -45,6 +54,7 @@ export class ListServiceError extends Error {
       | "INVALID_TITLE"
       | "INVALID_DESCRIPTION"
       | "INVALID_URL"
+      | "INVALID_TIME"
       | "NOT_FOUND"
       | "FORBIDDEN"
       | "DEFAULT_LIST"
@@ -256,6 +266,90 @@ export async function deleteTodoList(
   if (list.isDefault) return "default";
   await db.query(`DELETE FROM todo_lists WHERE id = $1 AND owner_user_id = $2`, [listId, userId]);
   return "deleted";
+}
+
+async function ownedTodoList(db: Db, listId: string, userId: string): Promise<TodoList> {
+  const list = await getTodoListForUser(db, listId, userId);
+  if (!list || list.role !== "OWNER") throw new ListServiceError("NOT_FOUND");
+  return list;
+}
+
+export async function getTodoListReminderSettings(
+  db: Db,
+  listId: string,
+  userId: string,
+): Promise<TodoListReminderSettings> {
+  await ownedTodoList(db, listId, userId);
+  const result = await db.query<{
+    reminder_time: string;
+    is_enabled: boolean;
+    last_notified_date: string | null;
+    updated_at: Date;
+  }>(
+    `SELECT reminder_time::text AS reminder_time, is_enabled,
+            last_notified_date::text AS last_notified_date, updated_at
+     FROM todo_list_reminders
+     WHERE list_id = $1
+     LIMIT 1`,
+    [listId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return {
+      listId,
+      enabled: false,
+      reminderTime: null,
+      lastNotifiedDate: null,
+      updatedAt: null,
+    };
+  }
+  return {
+    listId,
+    enabled: row.is_enabled,
+    reminderTime: row.reminder_time.slice(0, 5),
+    lastNotifiedDate: row.last_notified_date,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function setTodoListReminder(
+  db: Db,
+  listId: string,
+  userId: string,
+  time: string,
+): Promise<TodoListReminderSettings> {
+  await ownedTodoList(db, listId, userId);
+  const parsed = parseLocalTime(time);
+  if (!parsed) throw new ListServiceError("INVALID_TIME");
+  const normalized = `${String(parsed.hour).padStart(2, "0")}:${String(parsed.minute).padStart(2, "0")}`;
+
+  await db.query(
+    `INSERT INTO todo_list_reminders (list_id, reminder_time, is_enabled, updated_at)
+     VALUES ($1, $2::time, true, now())
+     ON CONFLICT (list_id) DO UPDATE
+       SET reminder_time = EXCLUDED.reminder_time,
+           is_enabled = true,
+           updated_at = now()`,
+    [listId, normalized],
+  );
+  return getTodoListReminderSettings(db, listId, userId);
+}
+
+export async function disableTodoListReminder(
+  db: Db,
+  listId: string,
+  userId: string,
+): Promise<TodoListReminderSettings> {
+  await ownedTodoList(db, listId, userId);
+  await db.query(
+    `INSERT INTO todo_list_reminders (list_id, reminder_time, is_enabled, updated_at)
+     VALUES ($1, '00:00'::time, false, now())
+     ON CONFLICT (list_id) DO UPDATE
+       SET is_enabled = false,
+           updated_at = now()`,
+    [listId],
+  );
+  return getTodoListReminderSettings(db, listId, userId);
 }
 
 export async function listTodoItems(

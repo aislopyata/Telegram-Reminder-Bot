@@ -111,7 +111,14 @@ import {
   formatReminderSummary,
   monthCells,
 } from "@/lib/telegram/render";
-import { COMMON_TIME_ZONES, isValidTimeZone, shiftMonth, toDateString } from "@/lib/time";
+import {
+  COMMON_TIME_ZONES,
+  isValidTimeZone,
+  scheduleCutoff,
+  shiftMonth,
+  slotIsFuture,
+  toDateString,
+} from "@/lib/time";
 import { normalizeTelegramUsername, REMINDER_TEXT_MAX } from "@/lib/validation";
 import { logger } from "@/lib/logger";
 import type { WorkflowState } from "@/generated/prisma/client";
@@ -242,23 +249,37 @@ async function renderDraft(
       text = ru.create.monthDaysTitle;
       reply = monthDaysKeyboard(draft.monthDays, draft.monthPage);
       break;
-    case "date":
+    case "date": {
+      const cutoff = scheduleCutoff(new Date(), draft.timeZone);
       text = ru.create.chooseDate(ru.calendar.monthLabel(draft.calendarYear, draft.calendarMonth));
       reply = calendarKeyboard(
         draft.calendarYear,
         draft.calendarMonth,
         draft.date,
         monthCells(draft.calendarYear, draft.calendarMonth),
+        cutoff.minDate,
       );
       break;
-    case "hour":
+    }
+    case "hour": {
+      const cutoff = scheduleCutoff(new Date(), draft.timeZone);
+      const stale = !draft.date || draft.date < cutoff.minDate;
       text = ru.create.chooseHour;
-      reply = hourKeyboard();
+      reply = hourKeyboard(
+        stale || draft.date === cutoff.minDate ? cutoff.minHour : 0,
+      );
       break;
-    case "minute":
+    }
+    case "minute": {
+      const cutoff = scheduleCutoff(new Date(), draft.timeZone);
+      const minMinute =
+        draft.date === cutoff.minDate && draft.hour === cutoff.minHour
+          ? cutoff.minMinute
+          : 0;
       text = ru.create.chooseMinute(draft.hour ?? 0);
-      reply = minuteKeyboard(draft.hour ?? 0);
+      reply = minuteKeyboard(draft.hour ?? 0, minMinute);
       break;
+    }
     case "text":
       text = draft.kind === "edit" ? ru.create.editTextPrompt : ru.create.enterText;
       reply = cancelOnlyKeyboard();
@@ -665,6 +686,22 @@ async function handleSelectDay(
   }
   const draft = loaded.draft;
   const date = toDateString(draft.calendarYear, draft.calendarMonth, day);
+  const cutoff = scheduleCutoff(new Date(), draft.timeZone);
+  if (date < cutoff.minDate) {
+    await sendText(
+      sender,
+      chatId,
+      ru.create.pastTime,
+      calendarKeyboard(
+        draft.calendarYear,
+        draft.calendarMonth,
+        draft.date,
+        monthCells(draft.calendarYear, draft.calendarMonth),
+        cutoff.minDate,
+      ),
+    );
+    return;
+  }
   const next: ReminderDraft = { ...draft, date, step: "hour" };
   await renderDraft(db, sender, chatId, loaded.user, next, loaded.workflow.messageId);
 }
@@ -681,7 +718,14 @@ async function handleSelectHour(
     await sendText(sender, chatId, ru.common.staleButton, menuKeyboard());
     return;
   }
-  const next: ReminderDraft = { ...loaded.draft, hour, step: "minute" };
+  const draft = loaded.draft;
+  const cutoff = scheduleCutoff(new Date(), draft.timeZone);
+  const stale = !draft.date || draft.date < cutoff.minDate;
+  if (stale || (draft.date === cutoff.minDate && hour < cutoff.minHour)) {
+    await sendText(sender, chatId, ru.create.pastTime, hourKeyboard(cutoff.minHour));
+    return;
+  }
+  const next: ReminderDraft = { ...draft, hour, step: "minute" };
   await renderDraft(db, sender, chatId, loaded.user, next, loaded.workflow.messageId);
 }
 
@@ -697,10 +741,33 @@ async function handleSelectMinute(
     await sendText(sender, chatId, ru.common.staleButton, menuKeyboard());
     return;
   }
+  const draft = loaded.draft;
+  const cutoff = scheduleCutoff(new Date(), draft.timeZone);
+  const minMinute =
+    draft.date === cutoff.minDate && draft.hour === cutoff.minHour
+      ? cutoff.minMinute
+      : 0;
+  let future = false;
+  if (draft.date && draft.hour !== null) {
+    try {
+      future = slotIsFuture(draft.date, draft.hour, minute, new Date(), draft.timeZone);
+    } catch {
+      future = false;
+    }
+  }
+  if (minute < minMinute || !future) {
+    await sendText(
+      sender,
+      chatId,
+      ru.create.pastTime,
+      minuteKeyboard(draft.hour ?? 0, minMinute),
+    );
+    return;
+  }
   const next: ReminderDraft = {
-    ...loaded.draft,
+    ...draft,
     minute,
-    step: loaded.draft.returnToConfirm ? "confirm" : "text",
+    step: draft.returnToConfirm ? "confirm" : "text",
   };
   await renderDraft(db, sender, chatId, loaded.user, next, loaded.workflow.messageId);
 }
@@ -1098,7 +1165,16 @@ async function handleReminderToggle(
     await sendText(sender, chatId, ru.reminders.cannotEnablePast, editMenuKeyboard(reminder.id, page));
     return;
   }
-  const updated = await setReminderEnabled(db, id, user.id, enabling);
+  let updated: { id: string; status: string } | null;
+  try {
+    updated = await setReminderEnabled(db, id, user.id, enabling);
+  } catch (error) {
+    if (error instanceof ReminderServiceError && error.code === "PAST_TIME") {
+      await sendText(sender, chatId, ru.reminders.cannotEnablePast, editMenuKeyboard(reminder.id, page));
+      return;
+    }
+    throw error;
+  }
   if (!updated) {
     await sendText(sender, chatId, ru.reminders.notFound, menuKeyboard());
     return;

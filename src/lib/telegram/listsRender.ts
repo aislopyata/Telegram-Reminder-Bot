@@ -1,6 +1,11 @@
 import { escapeHtml, truncate } from "@/lib/telegram/html";
 import { ru } from "@/lib/i18n/ru";
-import type { TodoItem, TodoList, TodoShare } from "@/lib/services/todoLists";
+import type {
+  TodoItem,
+  TodoList,
+  TodoListReminderSettings,
+  TodoShare,
+} from "@/lib/services/todoLists";
 import type { WishItem, WishList, WishShare } from "@/lib/services/wishLists";
 
 const LIST_PREVIEW_DESCRIPTION = 160;
@@ -177,4 +182,16 @@ export function formatWishShares(list: WishList, shares: WishShare[]): string {
     });
   }
   return lines.join("\n");
+}
+
+export function formatTodoListReminderSettings(
+  list: TodoList,
+  settings: TodoListReminderSettings,
+  zone: string,
+): string {
+  return [
+    ru.lists.reminderTitle(escapeHtml(list.name)),
+    "",
+    ru.lists.reminderCurrent(settings.reminderTime, settings.enabled, escapeHtml(zone)),
+  ].join("\n");
 }

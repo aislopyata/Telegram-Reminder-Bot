@@ -344,6 +344,18 @@ export const ru = {
     editable: "✏️ Можно редактировать",
     todoEmptyItems: "В этом списке пока нет задач.",
     wishEmptyItems: "В этом списке пока нет желаний.",
+    reminderTitle: (name: string) =>
+      `⏰ <b>Ежедневное напоминание</b>\n\nСписок задач: «${name}»`,
+    reminderCurrent: (time: string | null, enabled: boolean, zone: string) =>
+      enabled && time
+        ? `Текущее время: <b>${time}</b> (${zone})\nНапоминание включено. Задачи приходят полным списком, без кнопок.`
+        : "Напоминание выключено.",
+    reminderChooseMinute: (hour: number) =>
+      `⏰ <b>Время напоминания</b>\n\nЧас: <b>${String(hour).padStart(2, "0")}</b>. Выберите минуты.`,
+    reminderSaved: (time: string, zone: string) =>
+      `✅ Напоминание включено: <b>${time}</b> (${zone}).\nКаждый день вы будете получать полный список задач.`,
+    reminderDisabled: "⏸ Ежедневное напоминание выключено.",
+    reminderInvalidTime: "Некорректное время напоминания. Попробуйте ещё раз.",
     todoAddTitlePrompt:
       "✍️ <b>Новая задача</b>\n\nОтправьте название задачи одним сообщением (до 200 символов).",
     wishAddTitlePrompt:

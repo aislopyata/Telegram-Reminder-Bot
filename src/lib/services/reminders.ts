@@ -287,6 +287,14 @@ export async function setReminderEnabled(
   const row = current.rows[0];
   if (!row) return null;
 
+  const now = new Date();
+  if (enabled && row.type === "ONCE") {
+    // Enabling is a state transition, not a way around the create-time check.
+    if (!row.scheduled_at || row.scheduled_at.getTime() <= now.getTime()) {
+      throw new ReminderServiceError("PAST_TIME");
+    }
+  }
+
   const status = enabled ? "ACTIVE" : "DISABLED";
   let nextRunAtUtc = row.next_run_at;
   if (enabled) {

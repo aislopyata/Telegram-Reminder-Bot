@@ -15,6 +15,7 @@ import { logger } from "@/lib/logger";
 import { ru } from "@/lib/i18n/ru";
 import { escapeHtml } from "@/lib/telegram/html";
 import { processHabitRemindersOnce } from "./habits";
+import { processTodoRemindersOnce } from "./todoReminders";
 
 const REMINDER_BATCH = 25;
 const DELIVERY_BATCH = 50;
@@ -33,6 +34,10 @@ export type SchedulerStats = {
   habitRemindersSent: number;
   habitRemindersFailed: number;
   habitRemindersSkipped: number;
+  todoRemindersDue: number;
+  todoRemindersSent: number;
+  todoRemindersFailed: number;
+  todoRemindersSkipped: number;
 };
 
 type FetchedReminder = {
@@ -283,6 +288,10 @@ export async function processRemindersOnce(
     habitRemindersSent: 0,
     habitRemindersFailed: 0,
     habitRemindersSkipped: 0,
+    todoRemindersDue: 0,
+    todoRemindersSent: 0,
+    todoRemindersFailed: 0,
+    todoRemindersSkipped: 0,
   };
 
   await releaseExpiredClaims(db, now);
@@ -333,6 +342,16 @@ export async function processRemindersOnce(
     stats.habitRemindersSkipped = habitStats.habitRemindersSkipped;
   } catch (error) {
     logger.error("scheduler_habits_failed", error);
+  }
+
+  try {
+    const todoStats = await processTodoRemindersOnce(db, sender, now);
+    stats.todoRemindersDue = todoStats.todoRemindersDue;
+    stats.todoRemindersSent = todoStats.todoRemindersSent;
+    stats.todoRemindersFailed = todoStats.todoRemindersFailed;
+    stats.todoRemindersSkipped = todoStats.todoRemindersSkipped;
+  } catch (error) {
+    logger.error("scheduler_todo_reminders_failed", error);
   }
 
   return stats;

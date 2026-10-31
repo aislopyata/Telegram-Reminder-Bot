@@ -7,7 +7,7 @@ import type {
 } from "@/lib/telegram/types";
 import type { UserRecord } from "@/lib/services/users";
 import type { LoadedWorkflow } from "@/lib/services/workflows";
-import type { TodoItem } from "@/lib/services/todoLists";
+import type { TodoItem, TodoList } from "@/lib/services/todoLists";
 import type { WishItem } from "@/lib/services/wishLists";
 import {
   ListServiceError,
@@ -19,13 +19,16 @@ import {
   createTodoList,
   deleteTodoItem,
   deleteTodoList,
+  disableTodoListReminder,
   getTodoItemForUser,
   getTodoListForUser,
+  getTodoListReminderSettings,
   listTodoItems,
   listTodoListsForUser,
   listTodoShares,
   renameTodoList,
   setTodoItemCompleted,
+  setTodoListReminder,
   shareTodoList,
   unshareTodoList,
   updateTodoItem,
@@ -66,6 +69,7 @@ import { escapeHtml } from "@/lib/telegram/html";
 import {
   formatTodoItem,
   formatTodoList,
+  formatTodoListReminderSettings,
   formatTodoOverview,
   formatTodoShares,
   formatWishItem,
@@ -82,6 +86,9 @@ import {
   todoManageKeyboard,
   todoOverviewKeyboard,
   todoPermissionKeyboard,
+  todoReminderHoursKeyboard,
+  todoReminderMinutesKeyboard,
+  todoReminderSettingsKeyboard,
   todoSharesKeyboard,
   wishDeleteItemConfirmKeyboard,
   wishDeleteListConfirmKeyboard,
@@ -91,6 +98,7 @@ import {
   wishOverviewKeyboard,
   wishSharesKeyboard,
 } from "@/lib/telegram/ui";
+import { isValidTimeZone } from "@/lib/time";
 import {
   LIST_BULK_MAX_ITEMS,
   LIST_ITEM_DESCRIPTION_MAX,
@@ -125,6 +133,10 @@ const LIST_ACTION_TYPES = [
   "todoShareFriend",
   "todoSharePermission",
   "todoUnshare",
+  "todoReminder",
+  "todoReminderHour",
+  "todoReminderMinute",
+  "todoReminderDisable",
   "wishMenu",
   "wishPage",
   "wishCreate",
@@ -261,6 +273,26 @@ async function renderWishOverview(
     ),
     wishOverviewKeyboard(paged.slice, paged.page, paged.totalPages),
   );
+}
+
+function userZone(user: UserRecord): string {
+  return user.timeZone && isValidTimeZone(user.timeZone) ? user.timeZone : "UTC";
+}
+
+/** Reminder settings are visible and editable only to the list owner. */
+async function ownedTodoListOrSend(
+  db: Db,
+  sender: TelegramSender,
+  chatId: string,
+  user: UserRecord,
+  listId: string,
+): Promise<TodoList | null> {
+  const list = await getTodoListForUser(db, listId, user.id);
+  if (!list || list.role !== "OWNER") {
+    await send(sender, chatId, ru.lists.forbidden, todoOverviewKeyboard([], 1, 1));
+    return null;
+  }
+  return list;
 }
 
 async function renderTodoList(
@@ -936,6 +968,68 @@ export async function handleListCallback(
         user,
         action.id,
         ru.lists.unshared(escapeHtml(name)),
+      );
+      return;
+    }
+
+    case "todoReminder": {
+      const list = await ownedTodoListOrSend(db, sender, chatId, user, action.id);
+      if (!list) return;
+      const settings = await getTodoListReminderSettings(db, list.id, user.id);
+      await send(
+        sender,
+        chatId,
+        formatTodoListReminderSettings(list, settings, userZone(user)),
+        todoReminderHoursKeyboard(list.id, settings.enabled),
+      );
+      return;
+    }
+    case "todoReminderHour": {
+      const list = await ownedTodoListOrSend(db, sender, chatId, user, action.id);
+      if (!list) return;
+      await send(
+        sender,
+        chatId,
+        ru.lists.reminderChooseMinute(action.hour),
+        todoReminderMinutesKeyboard(list.id, action.hour),
+      );
+      return;
+    }
+    case "todoReminderMinute": {
+      const list = await ownedTodoListOrSend(db, sender, chatId, user, action.id);
+      if (!list) return;
+      const time = `${String(action.hour).padStart(2, "0")}:${String(action.minute).padStart(2, "0")}`;
+      try {
+        await setTodoListReminder(db, list.id, user.id, time);
+      } catch (error) {
+        if (error instanceof ListServiceError && error.code === "INVALID_TIME") {
+          await send(
+            sender,
+            chatId,
+            ru.lists.reminderInvalidTime,
+            todoReminderHoursKeyboard(list.id, false),
+          );
+          return;
+        }
+        throw error;
+      }
+      await send(
+        sender,
+        chatId,
+        ru.lists.reminderSaved(time, escapeHtml(userZone(user))),
+        todoReminderSettingsKeyboard(list.id, true),
+      );
+      return;
+    }
+    case "todoReminderDisable": {
+      const list = await ownedTodoListOrSend(db, sender, chatId, user, action.id);
+      if (!list) return;
+      await disableTodoListReminder(db, list.id, user.id);
+      await send(
+        sender,
+        chatId,
+        ru.lists.reminderDisabled,
+        todoReminderSettingsKeyboard(list.id, false),
       );
       return;
     }

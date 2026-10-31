@@ -90,6 +90,10 @@ psql 'postgresql://habits_test:habits_test@127.0.0.1:5432/telegram_habits_test' 
    `UPDATE last_notified_date` до отправки, поэтому перезапуск процесса и
    пересекающиеся запуски cron не создают дублей. Промпт не отправляется, если
    у пользователя нет активных привычек или напоминание выключено.
+9. Отправляет ежедневные напоминания по спискам задач с той же защитой от
+   дублей. Напоминание получает только владелец списка, в его часовом поясе.
+   Сообщение содержит весь список целиком; длинный список разбивается между
+   задачами из-за лимита Telegram, но не превращается в страницы.
 
 Статусы доставки: `PENDING`, `PROCESSING`, `SENT`, `RETRYABLE`, `PERMANENT`,
 `SKIPPED`. Permanent-ошибки (403/400 от Telegram) не ретраятся бесконечно.
@@ -113,6 +117,10 @@ psql 'postgresql://habits_test:habits_test@127.0.0.1:5432/telegram_habits_test' 
   новых выборов времени.
 - У напоминаний о привычках минуты по-прежнему выбираются свободно (все `00..59`),
   чтобы не менять поведение трекера.
+- При создании и включении одноразового напоминания прошедшие дата и время
+  недоступны: календарь не даёт выбрать прошедшие дни, а выбор часа и минут
+  скрывает уже наступившие слоты. Те же проверки повторяются на сервере, поэтому
+  подделанный callback или устаревший экран не создаст напоминание в прошлом.
 
 ## Списки задач и желаний
 
@@ -138,6 +146,10 @@ psql 'postgresql://habits_test:habits_test@127.0.0.1:5432/telegram_habits_test' 
   по данным callback. Подделанный или устаревший callback не даёт прав.
 - Списки и элементы листаются постранично; callback-данные содержат только
   числовые идентификаторы и укладываются в лимит Telegram 64 байта.
+- Владелец списка задач может включить ежедневное напоминание и выбрать время в
+  своём часовом поясе. Напоминание приходит полным списком задач — без
+  постраничной навигации и без inline-кнопок. Совместный доступ на это не влияет:
+  настройка видна и доступна только владельцу, и сообщение получает только он.
 
 ### Добавление элементов
 
@@ -218,8 +230,8 @@ psql 'postgresql://habits_test:habits_test@127.0.0.1:5432/telegram_habits_test' 
 `users`, `reminders`, `reminder_recipients`, `friend_requests`, `friendships`,
 `reminder_occurrences`, `reminder_deliveries`, `conversation_states`, `habits`,
 `habit_completions`, `habit_reminder_settings`, `todo_lists`, `todo_items`,
-`todo_list_shares`, `wish_lists`, `wish_list_items`, `wish_list_shares`,
-`ui_state`.
+`todo_list_shares`, `todo_list_reminders`, `wish_lists`, `wish_list_items`,
+`wish_list_shares`, `ui_state`.
 
 Для существующей базы обновление схемы выполняется версионированными SQL-миграциями
 из [`deploy/migrations`](deploy/migrations). Все миграции аддитивны и
@@ -231,13 +243,20 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
   -f deploy/migrations/20261026_lists.up.sql
+
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f deploy/migrations/20261031_todo_reminders.up.sql
 ```
 
 Миграция списков создаёт таблицы ToDo/Wish, доступы и `ui_state`; существующие
-напоминания, привычки, дружба и пользователи не изменяются. Повторный запуск
-безопасен. Откат удаляет только таблицы списков и состояние интерфейса:
+напоминания, привычки, дружба и пользователи не изменяются. Миграция ежедневных
+напоминаний добавляет только настройки напоминаний для списков задач. Повторный
+запуск обеих миграций безопасен. Откат удаляет только добавленные ими объекты:
 
 ```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f deploy/migrations/20261031_todo_reminders.down.sql
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
   -f deploy/migrations/20261026_lists.down.sql
 
@@ -261,9 +280,9 @@ sudo -u postgres psql -d telegram_reminders -f deploy/schema.sql
 ```
 
 Для чистой установки `deploy/schema.sql` уже содержит таблицы привычек, списков
-задач/желаний и `ui_state`; отдельно применять миграции не нужно. Применение
-миграций поверх свежей схемы безопасно — все объекты создаются через
-`IF NOT EXISTS`.
+задач/желаний, ежедневных напоминаний по спискам и `ui_state`; отдельно применять
+миграции не нужно. Применение миграций поверх свежей схемы безопасно — все
+объекты создаются через `IF NOT EXISTS`.
 
 Приложение использует только `DATABASE_URL`; серверный конфиг PostgreSQL менять
 не нужно.
@@ -323,6 +342,7 @@ VPS он не нужен: планировщик работает внутри �
 src/bot/index.ts             точка входа: cron + long polling
 src/lib/scheduler/           claim/lease, создание occurrence/delivery, backoff
 src/lib/scheduler/habits.ts  ежедневные напоминания о привычках
+src/lib/scheduler/todoReminders.ts  ежедневные полные списки задач
 src/lib/bot/lists.ts        сценарии ToDo/Wish: CRUD, доступы, совместное использование
 src/lib/telegram/primaryUi.ts  редактирование одного основного сообщения интерфейса
 src/lib/telegram/listsRender.ts  экранирование и рендер списков, безопасные ссылки

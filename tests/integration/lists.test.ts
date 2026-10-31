@@ -5,7 +5,7 @@ import { InMemoryTelegramSender } from "@/lib/telegram/api";
 import type { EditResult, InlineKeyboard } from "@/lib/telegram/types";
 import { handleTelegramUpdate } from "@/lib/bot/dispatcher";
 import { orderedPair, removeFriend } from "@/lib/services/friends";
-import { upsertUser, type UserRecord } from "@/lib/services/users";
+import { setUserTimezone, upsertUser, type UserRecord } from "@/lib/services/users";
 import {
   ListServiceError,
   addTodoItem,
@@ -13,18 +13,22 @@ import {
   createTodoList,
   deleteTodoItem,
   deleteTodoList,
+  disableTodoListReminder,
   ensureDefaultTodoList,
   getTodoItemForUser,
   getTodoListForUser,
+  getTodoListReminderSettings,
   listTodoItems,
   listTodoListsForUser,
   listTodoShares,
   renameTodoList,
   setTodoItemCompleted,
+  setTodoListReminder,
   shareTodoList,
   unshareTodoList,
   updateTodoItem,
 } from "@/lib/services/todoLists";
+import { processTodoRemindersOnce } from "@/lib/scheduler/todoReminders";
 import {
   WishListServiceError,
   addWishItem,
@@ -670,5 +674,118 @@ integration("todo and wish list integration", () => {
       description: null,
       url: "https://shop.example/item",
     });
+  });
+
+  it("stores a daily ToDo reminder for the owner only", async () => {
+    const list = await ensureDefaultTodoList(db, userA.id);
+
+    await expect(getTodoListReminderSettings(db, list.id, userB.id)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(setTodoListReminder(db, list.id, userB.id, "21:05")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+
+    await expect(setTodoListReminder(db, list.id, userA.id, "24:00")).rejects.toMatchObject({
+      code: "INVALID_TIME",
+    });
+    const enabled = await setTodoListReminder(db, list.id, userA.id, "21:05");
+    expect(enabled).toMatchObject({ enabled: true, reminderTime: "21:05" });
+
+    const disabled = await disableTodoListReminder(db, list.id, userA.id);
+    expect(disabled.enabled).toBe(false);
+  });
+
+  it("sends the complete ToDo list once per owner-local day", async () => {
+    await setUserTimezone(db, userA.id, "Europe/Moscow");
+    const list = await ensureDefaultTodoList(db, userA.id);
+    await addTodoItems(
+      db,
+      list.id,
+      userA.id,
+      Array.from({ length: 8 }, (_, index) => ({ title: `Задача ${index + 1}` })),
+    );
+    await setTodoListReminder(db, list.id, userA.id, "21:00");
+
+    const sender = new InMemoryTelegramSender();
+    // 18:00 UTC is 21:00 in Moscow.
+    let result = await processTodoRemindersOnce(
+      db,
+      sender,
+      new Date("2026-10-25T18:00:00.000Z"),
+    );
+    expect(result.todoRemindersSent).toBe(1);
+    expect(sender.sent).toHaveLength(1);
+    expect(sender.sent[0].chatId).toBe(String(TG_A));
+    expect(sender.sent[0].keyboard).toBeUndefined();
+    for (let index = 1; index <= 8; index += 1) {
+      expect(sender.sent[0].text).toContain(`Задача ${index}`);
+    }
+
+    result = await processTodoRemindersOnce(
+      db,
+      sender,
+      new Date("2026-10-25T18:00:00.000Z"),
+    );
+    expect(result.todoRemindersSent).toBe(0);
+    expect(sender.sent).toHaveLength(1);
+
+    // Before the local reminder time on the next day nothing is sent.
+    result = await processTodoRemindersOnce(
+      db,
+      sender,
+      new Date("2026-10-26T17:59:00.000Z"),
+    );
+    expect(result.todoRemindersSent).toBe(0);
+
+    result = await processTodoRemindersOnce(
+      db,
+      sender,
+      new Date("2026-10-26T18:00:00.000Z"),
+    );
+    expect(result.todoRemindersSent).toBe(1);
+    expect(sender.sent).toHaveLength(2);
+
+    await disableTodoListReminder(db, list.id, userA.id);
+    result = await processTodoRemindersOnce(
+      db,
+      sender,
+      new Date("2026-10-27T18:00:00.000Z"),
+    );
+    expect(result.todoRemindersSent).toBe(0);
+    expect(sender.sent).toHaveLength(2);
+  });
+
+  it("configures a reminder through list callbacks and rejects shared access", async () => {
+    const list = await ensureDefaultTodoList(db, userA.id);
+    const sender = new InMemoryTelegramSender();
+
+    await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoMenu()));
+    let result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoReminder(list.id)));
+    expect(result.last?.text).toContain("Ежедневное напоминание");
+    expect(
+      result.last?.keyboard?.inline_keyboard.flat().map((button) => button.callback_data),
+    ).toContain(cb.todoReminderHour(list.id, 21));
+
+    result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoReminderHour(list.id, 21)));
+    expect(result.last?.text).toContain("Выберите минуты");
+
+    result = await runUpdate(
+      db,
+      sender,
+      callbackUpdate(TG_A, cb.todoReminderMinute(list.id, 21, 5)),
+    );
+    expect(result.last?.text).toContain("21:05");
+    expect(await getTodoListReminderSettings(db, list.id, userA.id)).toMatchObject({
+      enabled: true,
+      reminderTime: "21:05",
+    });
+
+    result = await runUpdate(db, sender, callbackUpdate(TG_A, cb.todoReminderDisable(list.id)));
+    expect(result.last?.text).toContain("выключено");
+    expect((await getTodoListReminderSettings(db, list.id, userA.id)).enabled).toBe(false);
+
+    result = await runUpdate(db, sender, callbackUpdate(TG_B, cb.todoReminder(list.id)));
+    expect(result.last?.text).toContain("нет прав");
   });
 });

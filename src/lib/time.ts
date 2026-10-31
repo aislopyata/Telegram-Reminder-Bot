@@ -126,6 +126,51 @@ export function localTimeParts(instant: Date, zone: string): { hour: number; min
   return { hour: local.hour, minute: local.minute };
 }
 
+/** Minute pickers in the bot use quarter-hour steps. */
+export const MINUTE_SLOT = 15;
+
+export type ScheduleCutoff = {
+  /** Earliest local date that still has a selectable future slot. */
+  minDate: string;
+  /** First selectable hour on `minDate` (always 0 on later dates). */
+  minHour: number;
+  /** First selectable minute for `minHour`. */
+  minMinute: number;
+};
+
+/**
+ * One-time reminders must be strictly in the future, so "now" is not a valid
+ * slot. Returns the first quarter-hour slot after `instant` in `zone`, rolling
+ * over to the next local day when no slots remain.
+ */
+export function scheduleCutoff(instant: Date, zone: string): ScheduleCutoff {
+  const local = DateTime.fromJSDate(instant, { zone });
+  const nextSlot =
+    (Math.floor((local.hour * 60 + local.minute) / MINUTE_SLOT) + 1) * MINUTE_SLOT;
+  if (nextSlot >= 24 * 60) {
+    return {
+      minDate: local.plus({ days: 1 }).toFormat("yyyy-MM-dd"),
+      minHour: 0,
+      minMinute: 0,
+    };
+  }
+  return {
+    minDate: local.toFormat("yyyy-MM-dd"),
+    minHour: Math.floor(nextSlot / 60),
+    minMinute: nextSlot % 60,
+  };
+}
+
+export function slotIsFuture(
+  date: string,
+  hour: number,
+  minute: number,
+  now: Date,
+  zone: string,
+): boolean {
+  return zonedWallClockToUtc(date, hour, minute, zone).getTime() > now.getTime();
+}
+
 export function nextWeeklyOccurrence(
   zone: string,
   weekdays: number[],

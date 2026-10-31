@@ -110,6 +110,11 @@ export const cb = {
   todoSharePermission: (id: string, friendId: string, permission: "r" | "e") =>
     `t:shp:${id}:${friendId}:${permission}`,
   todoUnshare: (id: string, friendId: string) => `t:unsh:${id}:${friendId}`,
+  todoReminder: (id: string) => `t:rem:${id}`,
+  todoReminderHour: (id: string, hour: number) => `t:rh:${id}:${hour}`,
+  todoReminderMinute: (id: string, hour: number, minute: number) =>
+    `t:rm:${id}:${hour}:${minute}`,
+  todoReminderDisable: (id: string) => `t:rdis:${id}`,
 
   wishMenu: () => "w:menu",
   wishPage: (page: number) => `w:page:${page}`,
@@ -217,6 +222,10 @@ export type CallbackAction =
   | { type: "todoShareFriend"; id: string; friendId: string }
   | { type: "todoSharePermission"; id: string; friendId: string; permission: "READ" | "EDIT" }
   | { type: "todoUnshare"; id: string; friendId: string }
+  | { type: "todoReminder"; id: string }
+  | { type: "todoReminderHour"; id: string; hour: number }
+  | { type: "todoReminderMinute"; id: string; hour: number; minute: number }
+  | { type: "todoReminderDisable"; id: string }
   | { type: "wishMenu" }
   | { type: "wishPage"; page: number }
   | { type: "wishCreate" }
@@ -531,6 +540,23 @@ export function parseCallback(data: string): CallbackAction | null {
   }
   match = /^t:unsh:(\d{1,20}):(\d{1,20})$/.exec(data);
   if (match) return { type: "todoUnshare", id: match[1], friendId: match[2] };
+  match = /^t:rem:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoReminder", id: match[1] };
+  match = /^t:rh:(\d{1,20}):(\d{1,2})$/.exec(data);
+  if (match) {
+    const hour = intInRange(match[2], 0, 23);
+    return hour === null ? null : { type: "todoReminderHour", id: match[1], hour };
+  }
+  match = /^t:rm:(\d{1,20}):(\d{1,2}):(\d{1,2})$/.exec(data);
+  if (match) {
+    const hour = intInRange(match[2], 0, 23);
+    const minute = intInRange(match[3], 0, 59);
+    return hour === null || minute === null
+      ? null
+      : { type: "todoReminderMinute", id: match[1], hour, minute };
+  }
+  match = /^t:rdis:(\d{1,20})$/.exec(data);
+  if (match) return { type: "todoReminderDisable", id: match[1] };
 
   // Wish lists (read-only sharing)
   match = /^w:page:(\d{1,3})$/.exec(data);
